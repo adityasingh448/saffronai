@@ -1,6 +1,7 @@
 .env
 .venv/
 .tools/
+.netlify/
 __pycache__/
 *.pyc
 data/jobs/*
