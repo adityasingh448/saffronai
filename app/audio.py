@@ -13,10 +13,11 @@ import requests
 from mutagen import File as MutagenFile
 
 from app.config import settings
+from app.voices import get_voice, resolve_voice_model
 
 
 VOICE_PREVIEW_TEXT = (
-    "Hi, this is a short preview of the report walkthrough voice. "
+    "[warm, energetic, confident] Hi, this is a short preview of the report walkthrough voice. "
     "I will explain each point clearly... what it means for your team, why it matters, and what you can improve next."
 )
 
@@ -25,15 +26,10 @@ def synthesize_voiceover(script_text: str, job_dir: Path, voice_model: str | Non
     script_path = job_dir / "voiceover-script.txt"
     script_path.write_text(script_text, encoding="utf-8")
 
-    if settings.deepgram_api_key:
+    selected_voice_id = resolve_voice_model(voice_model)
+    if settings.elevenlabs_api_key and selected_voice_id:
         try:
-            return _synthesize_with_deepgram(script_text, job_dir, voice_model), "deepgram"
-        except Exception as exc:
-            print(f"Deepgram synthesis failed, falling back to the next voice provider: {exc}")
-
-    if settings.elevenlabs_api_key and settings.elevenlabs_voice_id:
-        try:
-            return _synthesize_with_elevenlabs(script_text, job_dir), "elevenlabs"
+            return _synthesize_with_elevenlabs(script_text, job_dir, selected_voice_id), "elevenlabs"
         except Exception as exc:
             print(f"ElevenLabs synthesis failed, falling back locally: {exc}")
 
@@ -47,11 +43,15 @@ def synthesize_voiceover(script_text: str, job_dir: Path, voice_model: str | Non
 
 
 def synthesize_voice_preview(voice_model: str, output_path: Path) -> Path:
-    if not settings.deepgram_api_key:
-        raise RuntimeError("Deepgram is not configured.")
+    if not settings.elevenlabs_api_key:
+        raise RuntimeError("ElevenLabs is not configured.")
+
+    selected_voice = get_voice(voice_model)
+    if not selected_voice:
+        raise RuntimeError("Unknown ElevenLabs voice.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    _request_deepgram_audio(VOICE_PREVIEW_TEXT, output_path, voice_model=voice_model)
+    _request_elevenlabs_audio(VOICE_PREVIEW_TEXT, output_path, selected_voice.model)
     return output_path
 
 
@@ -73,12 +73,13 @@ def audio_duration_seconds(audio_path: Path, fallback_text: str = "") -> float:
     return _estimated_spoken_duration(fallback_text)
 
 
-def _synthesize_with_elevenlabs(script_text: str, job_dir: Path) -> Path:
+def _synthesize_with_elevenlabs(script_text: str, job_dir: Path, voice_id: str) -> Path:
     output_path = job_dir / "voiceover.mp3"
-    chunks = _split_tts_text(script_text)
+    tts_text = _prepare_elevenlabs_text(script_text)
+    chunks = _split_tts_text(tts_text, limit=4200)
 
     if len(chunks) == 1:
-        _request_elevenlabs_audio(chunks[0], output_path)
+        _request_elevenlabs_audio(chunks[0], output_path, voice_id)
         return output_path
 
     part_paths: list[Path] = []
@@ -86,74 +87,45 @@ def _synthesize_with_elevenlabs(script_text: str, job_dir: Path) -> Path:
         part_path = job_dir / f"voiceover-part-{index:02d}.mp3"
         part_paths.append(part_path)
 
-    _run_tts_requests_in_parallel(
-        [(chunk, part_path, None) for chunk, part_path in zip(chunks, part_paths)],
-        provider="elevenlabs",
+    _run_elevenlabs_requests_in_parallel(
+        [
+            (
+                chunk,
+                part_path,
+                voice_id,
+                chunks[index - 1][-700:] if index > 0 else None,
+                chunks[index + 1][:700] if index < len(chunks) - 1 else None,
+            )
+            for index, (chunk, part_path) in enumerate(zip(chunks, part_paths))
+        ],
     )
     _concat_audio_parts(part_paths, output_path)
     return output_path
 
 
-def _synthesize_with_deepgram(script_text: str, job_dir: Path, voice_model: str | None) -> Path:
-    output_path = job_dir / "voiceover.mp3"
-    tts_text = _prepare_deepgram_text(script_text)
-    chunks = _split_tts_text(tts_text, limit=3600)
-
-    if len(chunks) == 1:
-        _request_deepgram_audio(chunks[0], output_path, voice_model=voice_model)
-        return output_path
-
-    part_paths: list[Path] = []
-    for index, chunk in enumerate(chunks, start=1):
-        part_path = job_dir / f"voiceover-deepgram-part-{index:02d}.mp3"
-        part_paths.append(part_path)
-
-    _run_tts_requests_in_parallel(
-        [(chunk, part_path, voice_model) for chunk, part_path in zip(chunks, part_paths)],
-        provider="deepgram",
-    )
-    _concat_audio_parts(part_paths, output_path)
-    return output_path
-
-
-def _run_tts_requests_in_parallel(
-    jobs: list[tuple[str, Path, str | None]],
-    provider: str,
+def _run_elevenlabs_requests_in_parallel(
+    jobs: list[tuple[str, Path, str, str | None, str | None]],
 ) -> None:
     max_workers = min(4, len(jobs))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
-        for script_text, output_path, voice_model in jobs:
-            if provider == "deepgram":
-                futures.append(executor.submit(_request_deepgram_audio, script_text, output_path, voice_model))
-            else:
-                futures.append(executor.submit(_request_elevenlabs_audio, script_text, output_path))
+        for script_text, output_path, voice_id, previous_text, next_text in jobs:
+            futures.append(
+                executor.submit(
+                    _request_elevenlabs_audio,
+                    script_text,
+                    output_path,
+                    voice_id,
+                    previous_text,
+                    next_text,
+                )
+            )
 
         for future in futures:
             future.result()
 
 
-def _request_deepgram_audio(script_text: str, output_path: Path, voice_model: str | None = None) -> None:
-    response = requests.post(
-        "https://api.deepgram.com/v1/speak",
-        headers={
-            "Authorization": f"Token {settings.deepgram_api_key}",
-            "Content-Type": "application/json",
-        },
-        params={
-            "model": voice_model or settings.deepgram_model,
-            "encoding": "mp3",
-            "speed": settings.deepgram_speed,
-            "mip_opt_out": str(settings.deepgram_mip_opt_out).lower(),
-        },
-        json={"text": script_text},
-        timeout=180,
-    )
-    response.raise_for_status()
-    output_path.write_bytes(response.content)
-
-
-def _prepare_deepgram_text(script_text: str) -> str:
+def _prepare_elevenlabs_text(script_text: str) -> str:
     paragraphs = [clean_script for clean_script in re_split_paragraphs(script_text) if clean_script]
     if not paragraphs:
         return script_text
@@ -164,12 +136,13 @@ def _prepare_deepgram_text(script_text: str) -> str:
         paragraph = re.sub(r"\bPoint\s+(\d+):", r"Point \1. ", paragraph)
         paragraph = paragraph.replace("Now, here is", "Now... here is")
         paragraph = paragraph.replace("So the recommendation is simple:", "So, the recommendation is simple.")
+        paragraph = paragraph.replace("This is not just an observation;", "This is not just an observation... ")
         paragraph = re.sub(r"\bSEO\b", "S E O", paragraph)
         paragraph = re.sub(r"\bCTR\b", "C T R", paragraph)
         paragraph = re.sub(r"\bCPC\b", "C P C", paragraph)
         normalized.append(paragraph)
 
-    return "\n\n... ".join(normalized)
+    return "[warm, energetic, confident, natural pacing]\n\n" + "\n\n... ".join(normalized)
 
 
 def _ffmpeg_audio_duration_seconds(audio_path: Path) -> float | None:
@@ -201,24 +174,38 @@ def _duration_parts_to_seconds(parts: tuple[str, str, str]) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-def _request_elevenlabs_audio(script_text: str, output_path: Path) -> None:
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{settings.elevenlabs_voice_id}"
+def _request_elevenlabs_audio(
+    script_text: str,
+    output_path: Path,
+    voice_id: str,
+    previous_text: str | None = None,
+    next_text: str | None = None,
+) -> None:
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    payload = {
+        "text": script_text,
+        "model_id": settings.elevenlabs_model_id,
+        "voice_settings": {
+            "stability": 0.34,
+            "similarity_boost": 0.86,
+            "style": 0.72,
+            "use_speaker_boost": True,
+        },
+        "apply_text_normalization": "auto",
+    }
+    if previous_text:
+        payload["previous_text"] = previous_text
+    if next_text:
+        payload["next_text"] = next_text
+
     response = requests.post(
         url,
         headers={
             "xi-api-key": settings.elevenlabs_api_key,
             "Content-Type": "application/json",
         },
-        json={
-            "text": script_text,
-            "model_id": settings.elevenlabs_model_id,
-            "voice_settings": {
-                "stability": 0.32,
-                "similarity_boost": 0.9,
-                "style": 0.55,
-                "use_speaker_boost": True,
-            },
-        },
+        params={"output_format": "mp3_44100_128"},
+        json=payload,
         timeout=180,
     )
     response.raise_for_status()

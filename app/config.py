@@ -30,14 +30,9 @@ class Settings:
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
-    deepgram_api_key: str | None = os.getenv("DEEPGRAM_API_KEY")
-    deepgram_model: str = os.getenv("DEEPGRAM_MODEL", "aura-2-orpheus-en")
-    deepgram_speed: float = float(os.getenv("DEEPGRAM_SPEED", "1.0"))
-    deepgram_mip_opt_out: bool = _env_bool("DEEPGRAM_MIP_OPT_OUT", "true")
-
     elevenlabs_api_key: str | None = os.getenv("ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str | None = os.getenv("ELEVENLABS_VOICE_ID")
-    elevenlabs_model_id: str = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+    elevenlabs_model_id: str = os.getenv("ELEVENLABS_MODEL_ID", "eleven_v3")
 
     heygen_api_key: str | None = os.getenv("HEYGEN_API_KEY")
     heygen_avatar_id: str | None = os.getenv("HEYGEN_AVATAR_ID")

@@ -5,7 +5,7 @@ This MVP turns a prospect report PDF into a personalized walkthrough video:
 1. Upload a PDF report.
 2. Extract page text and render each page as an image.
 3. Generate a consultative voiceover script.
-4. Create natural voiceover audio with Deepgram when a key is configured.
+4. Create natural voiceover audio with ElevenLabs v3 when a key is configured.
 5. Render a Remotion MP4 with smooth camera zooms, report highlights, side motion graphics, and no presenter/avatar branding.
 
 ## Run locally
@@ -31,29 +31,20 @@ OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-Preferred for realistic report walkthrough voiceover:
-
-```env
-DEEPGRAM_API_KEY=your_key
-DEEPGRAM_MODEL=aura-2-arcas-en
-DEEPGRAM_SPEED=0.96
-DEEPGRAM_MIP_OPT_OUT=true
-```
-
-Optional ElevenLabs fallback/custom voice:
+Required for realistic report walkthrough voiceover:
 
 ```env
 ELEVENLABS_API_KEY=your_key
 ELEVENLABS_VOICE_ID=your_custom_voice_id
-ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+ELEVENLABS_MODEL_ID=eleven_v3
 ```
 
 Without keys, the app still works in demo mode:
 
 - Script generation uses a local deterministic writer.
-- Voiceover uses Windows local speech when available. This is only a demo fallback; production-quality natural emotion requires Deepgram or another production TTS provider.
+- Voiceover uses Windows local speech when available. This is only a demo fallback; production-quality natural emotion requires ElevenLabs or another production TTS provider.
 
-The upload form includes selectable Deepgram voices with play buttons. The selected voice model is stored on the job and used for the final video narration.
+The upload form fetches saved/custom voices from the configured ElevenLabs account and shows them as selectable voice cards with preview buttons. The selected voice ID is stored on the job and used for the final video narration.
 
 ## Video rendering
 

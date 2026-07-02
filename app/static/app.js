@@ -139,14 +139,14 @@ async function loadVoices() {
     const payload = await response.json();
     renderVoices(payload.voices || [], payload.default_voice_model, payload.preview_enabled);
   } catch (_error) {
-    voiceStatus.textContent = "Default voice";
+    voiceStatus.textContent = "ElevenLabs voices unavailable";
     voiceOptions.innerHTML = `
       <div class="voice-card selected">
         <label class="voice-main">
-          <input type="radio" name="voice_model" value="aura-2-arcas-en" checked />
+          <input type="radio" name="voice_model" value="" checked />
           <span>
-            <strong>Arcas</strong>
-            <em>Male · Natural, smooth, clear</em>
+            <strong>Default voice</strong>
+            <em>ElevenLabs voice list could not load</em>
           </span>
         </label>
       </div>
@@ -156,7 +156,7 @@ async function loadVoices() {
 
 function renderVoices(voices, defaultVoiceModel, previewEnabled) {
   if (!voices.length) {
-    voiceStatus.textContent = "Default voice";
+    voiceStatus.textContent = "No ElevenLabs voices found";
     return;
   }
 
@@ -173,11 +173,11 @@ function renderVoices(voices, defaultVoiceModel, previewEnabled) {
             <input type="radio" name="voice_model" value="${escapeHtml(voice.model)}" ${checked} />
             <span>
               <strong>${escapeHtml(voice.name)}</strong>
-              <em>${escapeHtml(voice.gender)} · ${escapeHtml(voice.tone)}</em>
+              <em>${escapeHtml(voice.gender)} - ${escapeHtml(voice.tone)}</em>
             </span>
           </label>
           ${recommended}
-          <button class="voice-play" type="button" data-model="${escapeHtml(voice.model)}" aria-label="Play ${escapeHtml(voice.name)} preview" title="Play preview" ${disabled}>▶</button>
+          <button class="voice-play" type="button" data-model="${escapeHtml(voice.model)}" aria-label="Play ${escapeHtml(voice.name)} preview" title="Play preview" ${disabled}>Play</button>
         </div>
       `;
     })
@@ -222,19 +222,27 @@ async function playVoicePreview(button) {
   if (activePreviewButton) resetPreviewButton(activePreviewButton);
   activePreviewButton = button;
   button.disabled = true;
-  button.textContent = "…";
+  button.textContent = "...";
 
   previewAudio.pause();
   previewAudio = new Audio(`/api/voices/preview?voice_model=${encodeURIComponent(model)}`);
-  previewAudio.addEventListener("canplay", () => {
-    button.disabled = false;
-    button.textContent = "■";
-  }, { once: true });
+  previewAudio.addEventListener(
+    "canplay",
+    () => {
+      button.disabled = false;
+      button.textContent = "Stop";
+    },
+    { once: true },
+  );
   previewAudio.addEventListener("ended", () => resetPreviewButton(button), { once: true });
-  previewAudio.addEventListener("error", () => {
-    resetPreviewButton(button);
-    voiceStatus.textContent = "Preview failed";
-  }, { once: true });
+  previewAudio.addEventListener(
+    "error",
+    () => {
+      resetPreviewButton(button);
+      voiceStatus.textContent = "Preview failed";
+    },
+    { once: true },
+  );
 
   try {
     await previewAudio.play();
@@ -246,6 +254,6 @@ async function playVoicePreview(button) {
 
 function resetPreviewButton(button) {
   button.disabled = false;
-  button.textContent = "▶";
+  button.textContent = "Play";
   if (activePreviewButton === button) activePreviewButton = null;
 }

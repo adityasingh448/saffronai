@@ -22,8 +22,11 @@ from app.video import compose_walkthrough_video, overlay_avatar_video
 from app.voices import default_voice_model, get_voice, resolve_voice_model, voice_label, voice_options
 
 
+STATIC_DIR = settings.base_dir / "app" / "static"
+
 app = FastAPI(title="Saffron AI Sales Automation Agent")
-app.mount("/static", StaticFiles(directory=settings.base_dir / "app" / "static"), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
 
 def _now() -> str:
@@ -54,7 +57,17 @@ def _read_job(job_id: str) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return (settings.base_dir / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/styles.css", include_in_schema=False)
+def root_styles() -> FileResponse:
+    return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
+
+
+@app.get("/app.js", include_in_schema=False)
+def root_app_js() -> FileResponse:
+    return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
 
 
 @app.get("/api/health")
@@ -63,8 +76,7 @@ def health() -> dict:
         "ok": True,
         "brand": settings.brand_name,
         "openai": bool(settings.openai_api_key),
-        "deepgram": bool(settings.deepgram_api_key),
-        "elevenlabs": bool(settings.elevenlabs_api_key and settings.elevenlabs_voice_id),
+        "elevenlabs": bool(settings.elevenlabs_api_key),
         "heygen": can_use_heygen(),
         "hyperframes": can_use_hyperframes(),
         "remotion": can_use_remotion(),
@@ -76,8 +88,8 @@ def health() -> dict:
 def list_voices() -> dict:
     return {
         "default_voice_model": default_voice_model(),
-        "voices": voice_options(),
-        "preview_enabled": bool(settings.deepgram_api_key),
+        "voices": voice_options(force_refresh=True),
+        "preview_enabled": bool(settings.elevenlabs_api_key),
     }
 
 
@@ -86,8 +98,8 @@ def voice_preview(voice_model: str = Query(..., min_length=3)) -> FileResponse:
     selected_voice = get_voice(voice_model)
     if not selected_voice:
         raise HTTPException(status_code=400, detail="Unknown voice option.")
-    if not settings.deepgram_api_key:
-        raise HTTPException(status_code=503, detail="Deepgram is not configured.")
+    if not settings.elevenlabs_api_key:
+        raise HTTPException(status_code=503, detail="ElevenLabs is not configured.")
 
     safe_name = selected_voice.model.replace("/", "-").replace("\\", "-")
     preview_path = settings.data_dir / "voice-previews" / f"{safe_name}.mp3"
