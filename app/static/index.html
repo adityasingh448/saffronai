@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Saffron AI Sales Automation Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="nav-logo" href="/" aria-label="Saffron AI">
+        <img src="/static/assets/saffronai-ui.png" alt="Saffron AI" />
+      </a>
+      <button class="nav-cta" type="button" onclick="document.querySelector('#pdf').click()">Upload PDF</button>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-badge"><span>New</span> AI report video agent</div>
+        <h1>Turn PDF Reports into Clear Explanation Videos</h1>
+        <p>Upload a report, choose a natural male voice, and generate a polished walkthrough with clear zooms on important topics.</p>
+      </section>
+
+      <section class="workspace">
+        <section class="panel input-panel">
+        <form id="job-form" class="form">
+          <input type="hidden" name="language" value="English" />
+          <input type="hidden" name="avatar_mode" value="off" />
+
+          <label class="file-drop" for="pdf">
+            <input id="pdf" name="pdf" type="file" accept="application/pdf" required />
+            <span id="file-label">Drop or choose report PDF</span>
+          </label>
+
+          <div class="grid">
+            <label>
+              Prospect name
+              <input name="prospect_name" placeholder="e.g. Rohan" />
+            </label>
+            <label>
+              Company
+              <input name="target_company" placeholder="e.g. Acme Inc." />
+            </label>
+          </div>
+
+          <div class="grid">
+            <label>
+              Narration language
+              <input value="English" readonly />
+            </label>
+            <label>
+              Target minutes
+              <input name="max_minutes" type="number" min="1" max="6" value="3" />
+            </label>
+          </div>
+
+          <div class="grid single">
+            <label>
+              Video format
+              <select name="video_format">
+                <option value="horizontal" selected>Horizontal 16:9</option>
+                <option value="vertical">Vertical 9:16</option>
+              </select>
+            </label>
+          </div>
+
+          <section class="voice-section" aria-label="Voice selection">
+            <div class="section-head">
+              <span>Voice</span>
+              <small id="voice-status">Loading previews...</small>
+            </div>
+            <div id="voice-options" class="voice-options"></div>
+          </section>
+
+          <button id="submit" type="submit">
+            <span>Create video</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="panel output-panel">
+        <div class="status-card">
+          <div>
+            <p class="eyebrow">Pipeline</p>
+            <h2 id="stage">Ready for a PDF</h2>
+          </div>
+          <span id="status-pill" class="pill">Idle</span>
+        </div>
+
+        <div class="steps">
+          <div class="step" data-step="pdf">PDF analysis</div>
+          <div class="step" data-step="script">Voiceover script</div>
+          <div class="step" data-step="audio">Deepgram voice</div>
+          <div class="step" data-step="video">Video render</div>
+        </div>
+
+        <div id="result" class="result empty">
+          <div class="empty-state">
+            <div class="play-mark"></div>
+            <p>Generated walkthrough will appear here.</p>
+          </div>
+        </div>
+      </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

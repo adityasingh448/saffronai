@@ -1,0 +1,12 @@
+.env
+.venv/
+.tools/
+__pycache__/
+*.pyc
+data/jobs/*
+!data/jobs/.gitkeep
+data/tools/
+data/voice-previews/
+hyperframes-sales-edit/assets/
+hyperframes-sales-edit/renders/
+hyperframes-sales-edit/index.html
