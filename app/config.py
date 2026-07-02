@@ -52,6 +52,13 @@ class Settings:
     hyperframes_media_tools_dir: Path = _env_path("HYPERFRAMES_MEDIA_TOOLS_DIR", "data/tools/hyperframes-media")
     hyperframes_ffprobe_package: str = os.getenv("HYPERFRAMES_FFPROBE_PACKAGE", "ffprobe-static@3.1.0")
 
+    remotion_template_dir: Path = _env_path("REMOTION_TEMPLATE_DIR", "remotion-report")
+    remotion_fps: int = int(os.getenv("REMOTION_FPS", "60"))
+    remotion_crf: int = int(os.getenv("REMOTION_CRF", "18"))
+    remotion_codec: str = os.getenv("REMOTION_CODEC", "h264")
+    remotion_timeout_seconds: int = int(os.getenv("REMOTION_TIMEOUT_SECONDS", "7200"))
+    remotion_concurrency: str = os.getenv("REMOTION_CONCURRENCY", "")
+
 
 settings = Settings()
 settings.jobs_dir.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,7 @@ This MVP turns a prospect report PDF into a personalized walkthrough video:
 2. Extract page text and render each page as an image.
 3. Generate a consultative voiceover script.
 4. Create natural voiceover audio with Deepgram when a key is configured.
-5. Render a HyperFrames MP4 with page movement, report highlights, and no presenter/avatar branding.
+5. Render a Remotion MP4 with smooth camera zooms, report highlights, side motion graphics, and no presenter/avatar branding.
 
 ## Run locally
 
@@ -57,27 +57,28 @@ The upload form includes selectable Deepgram voices with play buttons. The selec
 
 ## Video rendering
 
-HyperFrames is linked into the main agent pipeline by default:
+Remotion is linked into the main agent pipeline by default:
 
 ```env
-VIDEO_RENDERER=hyperframes
-HYPERFRAMES_PACKAGE=hyperframes@0.7.22
-HYPERFRAMES_QUALITY=high
-HYPERFRAMES_FPS=60
+VIDEO_RENDERER=remotion
+REMOTION_TEMPLATE_DIR=remotion-report
+REMOTION_FPS=60
+REMOTION_CRF=18
+REMOTION_CODEC=h264
 ```
 
-Each job creates a fresh `hyperframes-render` project inside `data/jobs/<job-id>/`, copies the rendered PDF pages and voiceover into it, generates a dynamic `index.html`, then runs `npx hyperframes render`.
+Each job copies the rendered PDF pages, voiceover, and a generated `props.json` file into `remotion-report/public/jobs/<job-id>/`, then runs Remotion from the `remotion-report` project.
 
-The renderer prepares local `ffmpeg`/`ffprobe` binaries under `data/tools/` when needed so HyperFrames can encode without a separate system install.
+On the first Remotion job, the Python backend runs `npm install` inside `remotion-report` if dependencies are missing. Remotion v4 bundles FFmpeg support, so a separate system FFmpeg install is not required for normal renders.
 
-The HyperFrames version renders crisp PDF page images and zooms into the PDF-derived heading or main highlighted line for each section. Marker highlights sweep over the exact target phrase, then fade out. The rendered video does not include a logo, agency branding, or a presenter badge.
+The Remotion version renders crisp 1080p/60fps PDF page images, zooms into the PDF-derived heading or main highlighted line for each section, and highlights the exact target phrase while a side motion panel explains the current pointer. The rendered video does not include a logo, agency branding, or a presenter badge.
 
-The generated video is client-facing: the script speaks directly to the viewer of the report, not as an internal sales-team note. The upload form supports two output formats:
+The generated video is viewer-facing: the script speaks directly to the person watching the report, not as an internal sales-team note. The upload form supports two output formats:
 
-- `Horizontal 16:9` for desktop walkthroughs and client review calls.
+- `Horizontal 16:9` for desktop walkthroughs and review calls.
 - `Vertical 9:16` for mobile-first sharing, reels, and shorts.
 
-Set `VIDEO_RENDERER=local` if you need the older PIL/FFmpeg renderer.
+Set `VIDEO_RENDERER=local` if you need the older PIL/FFmpeg renderer, or `VIDEO_RENDERER=hyperframes` only if you want to use the legacy HyperFrames renderer.
 
 ## Outputs
 
@@ -89,7 +90,7 @@ Each run creates a folder under `data/jobs/<job-id>/` containing:
 - `script.json`
 - `voiceover.wav` or `voiceover.mp3`
 - `walkthrough.mp4`
-- `hyperframes-render/` when `VIDEO_RENDERER=hyperframes`
+- generated Remotion job assets under `remotion-report/public/jobs/<job-id>/` when `VIDEO_RENDERER=remotion`
 
 ## Presenter support
 

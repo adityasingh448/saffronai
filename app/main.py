@@ -16,6 +16,7 @@ from app.config import settings
 from app.heygen import can_use_heygen, create_heygen_avatar_video
 from app.hyperframes_renderer import can_use_hyperframes, compose_hyperframes_walkthrough_video
 from app.pdf_tools import extract_pdf_pages
+from app.remotion_renderer import can_use_remotion, compose_remotion_walkthrough_video
 from app.script_writer import write_walkthrough_script
 from app.video import compose_walkthrough_video, overlay_avatar_video
 from app.voices import default_voice_model, get_voice, resolve_voice_model, voice_label, voice_options
@@ -66,6 +67,7 @@ def health() -> dict:
         "elevenlabs": bool(settings.elevenlabs_api_key and settings.elevenlabs_voice_id),
         "heygen": can_use_heygen(),
         "hyperframes": can_use_hyperframes(),
+        "remotion": can_use_remotion(),
         "video_renderer": settings.video_renderer,
     }
 
@@ -210,7 +212,21 @@ def _run_pipeline(job_id: str) -> None:
         page_images = [page.image_path for page in pages]
         page_highlights = [page.highlights for page in pages]
 
-        if settings.video_renderer == "hyperframes":
+        if settings.video_renderer == "remotion":
+            _set_stage(job_id, "running", "Rendering the video")
+            video_path = compose_remotion_walkthrough_video(
+                page_images=page_images,
+                page_scripts=script.page_scripts,
+                page_highlights=page_highlights,
+                audio_path=audio_path,
+                output_path=base_video_path,
+                title=script.title,
+                brand_name="",
+                avatar_mode=render_avatar_mode,
+                prospect_label=prospect_label,
+                video_format=inputs.get("video_format", "horizontal"),
+            )
+        elif settings.video_renderer == "hyperframes":
             _set_stage(job_id, "running", "Rendering the video")
             video_path = compose_hyperframes_walkthrough_video(
                 page_images=page_images,
@@ -289,5 +305,7 @@ def _normalize_video_format(value: str) -> str:
 def _public_error_message(message: str) -> str:
     cleaned = re.sub(r"\bHyperFrames\b", "video renderer", message or "", flags=re.IGNORECASE)
     cleaned = re.sub(r"\bhyperframes\b", "video renderer", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bRemotion\b", "video renderer", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bremotion\b", "video renderer", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"VIDEO_RENDERER must be either '[^']+' or '[^']+'", "Video renderer is not configured correctly", cleaned)
     return cleaned or "Video generation failed."
