@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Saffron AI Sales Automation Agent</title>
-    <link rel="stylesheet" href="styles.css?v=text-file-experiment-1" />
+    <link rel="stylesheet" href="styles.css?v=voice-provider-1" />
   </head>
   <body>
     <header class="site-nav">
@@ -26,6 +26,7 @@
         <form id="job-form" class="form">
           <input type="hidden" name="language" value="English" />
           <input type="hidden" name="avatar_mode" value="off" />
+          <input id="voice-provider" type="hidden" name="voice_provider" value="elevenlabs" />
 
           <label class="file-drop" for="pdf">
             <input id="pdf" name="pdf" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.json,.html,.htm,.rtf,.docx,text/plain,text/markdown,application/pdf" required />
@@ -110,8 +111,12 @@
 
           <section class="voice-section" aria-label="Voice selection">
             <div class="section-head">
-              <span>Voice</span>
+              <span>Voice Module</span>
               <small id="voice-status">Loading previews...</small>
+            </div>
+            <div id="voice-provider-options" class="voice-provider-options" aria-label="Voice provider">
+              <button type="button" class="voice-provider-pill selected" data-provider="elevenlabs">ElevenLabs</button>
+              <button type="button" class="voice-provider-pill" data-provider="deepgram">Deepgram</button>
             </div>
             <div id="voice-options" class="voice-options"></div>
           </section>
@@ -134,7 +139,7 @@
         <div class="steps">
           <div class="step" data-step="pdf">File analysis</div>
           <div class="step" data-step="script">Voiceover script</div>
-          <div class="step" data-step="audio">ElevenLabs voice</div>
+          <div class="step" data-step="audio">Voice audio</div>
           <div class="step" data-step="video">Video render</div>
         </div>
 
@@ -162,6 +167,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=text-file-experiment-1"></script>
+    <script src="app.js?v=voice-provider-1"></script>
   </body>
 </html>

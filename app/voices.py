@@ -18,6 +18,7 @@ class VoiceOption:
     name: str
     gender: str
     tone: str
+    provider: str = "elevenlabs"
     recommended: bool = False
     preview_url: str = ""
     category: str = ""
@@ -26,11 +27,55 @@ class VoiceOption:
         return asdict(self)
 
 
-def voice_options(force_refresh: bool = False) -> list[dict[str, object]]:
+def voice_options(force_refresh: bool = False, provider: str = "elevenlabs") -> list[dict[str, object]]:
+    provider = normalize_voice_provider(provider)
+    if provider == "deepgram":
+        return [voice.to_dict() for voice in deepgram_voice_options()]
     return [voice.to_dict() for voice in _load_elevenlabs_voices(force_refresh=force_refresh)]
 
 
-def default_voice_model() -> str:
+def voice_provider_options() -> list[dict[str, object]]:
+    return [
+        {
+            "value": "elevenlabs",
+            "label": "ElevenLabs",
+            "configured": bool(settings.elevenlabs_api_key),
+            "description": "Saved/custom voices from your ElevenLabs account",
+        },
+        {
+            "value": "deepgram",
+            "label": "Deepgram",
+            "configured": bool(settings.deepgram_api_key),
+            "description": "Aura voices for fast report narration",
+        },
+    ]
+
+
+def default_voice_provider() -> str:
+    preferred = normalize_voice_provider(settings.default_voice_provider)
+    if preferred == "deepgram" and settings.deepgram_api_key:
+        return "deepgram"
+    if preferred == "elevenlabs" and settings.elevenlabs_api_key:
+        return "elevenlabs"
+    if settings.elevenlabs_api_key:
+        return "elevenlabs"
+    if settings.deepgram_api_key:
+        return "deepgram"
+    return "elevenlabs"
+
+
+def normalize_voice_provider(provider: str | None) -> str:
+    normalized = (provider or "").strip().lower()
+    if normalized in {"deepgram", "dg", "aura"}:
+        return "deepgram"
+    return "elevenlabs"
+
+
+def default_voice_model(provider: str = "elevenlabs") -> str:
+    provider = normalize_voice_provider(provider)
+    if provider == "deepgram":
+        return default_deepgram_voice_model()
+
     voices = _load_elevenlabs_voices()
     configured = (settings.elevenlabs_voice_id or "").strip()
     if configured and any(voice.model == configured for voice in voices):
@@ -43,23 +88,70 @@ def default_voice_model() -> str:
     return configured
 
 
-def get_voice(model: str | None) -> VoiceOption | None:
+def get_voice(model: str | None, provider: str = "elevenlabs") -> VoiceOption | None:
     if not model:
         return None
+    provider = normalize_voice_provider(provider)
     normalized = model.strip()
-    return next((voice for voice in _load_elevenlabs_voices() if voice.model == normalized), None)
+    voices = deepgram_voice_options() if provider == "deepgram" else _load_elevenlabs_voices()
+    return next((voice for voice in voices if voice.model == normalized), None)
 
 
-def resolve_voice_model(model: str | None) -> str:
+def resolve_voice_model(model: str | None, provider: str = "elevenlabs") -> str:
+    provider = normalize_voice_provider(provider)
     requested = (model or "").strip()
-    if requested and get_voice(requested):
+    if requested and get_voice(requested, provider=provider):
         return requested
-    return default_voice_model()
+    return default_voice_model(provider)
 
 
-def voice_label(model: str | None) -> str:
-    voice = get_voice(resolve_voice_model(model))
-    return voice.name if voice else "ElevenLabs voice"
+def voice_label(model: str | None, provider: str = "elevenlabs") -> str:
+    provider = normalize_voice_provider(provider)
+    voice = get_voice(resolve_voice_model(model, provider=provider), provider=provider)
+    if voice:
+        return voice.name
+    return "Deepgram voice" if provider == "deepgram" else "ElevenLabs voice"
+
+
+def default_deepgram_voice_model() -> str:
+    configured = (settings.deepgram_voice_id or "").strip()
+    voices = deepgram_voice_options()
+    if configured and any(voice.model == configured for voice in voices):
+        return configured
+    recommended = next((voice for voice in voices if voice.recommended), None)
+    if recommended:
+        return recommended.model
+    return voices[0].model
+
+
+def deepgram_voice_options() -> list[VoiceOption]:
+    configured = (settings.deepgram_voice_id or "").strip()
+    voices = [
+        VoiceOption("aura-2-apollo-en", "Apollo", "Masculine / Adult / US", "Confident, comfortable, casual", "deepgram", recommended=not configured),
+        VoiceOption("aura-2-arcas-en", "Arcas", "Masculine / Adult / US", "Natural, smooth, clear, comfortable", "deepgram"),
+        VoiceOption("aura-2-aries-en", "Aries", "Masculine / Adult / US", "Warm, energetic, caring", "deepgram"),
+        VoiceOption("aura-2-atlas-en", "Atlas", "Masculine / Mature / US", "Enthusiastic, confident, approachable", "deepgram"),
+        VoiceOption("aura-2-draco-en", "Draco", "Masculine / Adult / British", "Warm, approachable, trustworthy, baritone", "deepgram"),
+        VoiceOption("aura-2-hermes-en", "Hermes", "Masculine / Adult / US", "Expressive, engaging, professional", "deepgram"),
+        VoiceOption("aura-2-jupiter-en", "Jupiter", "Masculine / Adult / US", "Expressive, knowledgeable, baritone", "deepgram"),
+        VoiceOption("aura-2-mars-en", "Mars", "Masculine / Adult / US", "Smooth, patient, trustworthy, baritone", "deepgram"),
+        VoiceOption("aura-2-neptune-en", "Neptune", "Masculine / Adult / US", "Professional, patient, polite", "deepgram"),
+        VoiceOption("aura-2-orpheus-en", "Orpheus", "Masculine / Adult / US", "Professional, clear, confident, trustworthy", "deepgram"),
+        VoiceOption("aura-2-thalia-en", "Thalia", "Feminine / Adult / US", "Clear, confident, energetic, enthusiastic", "deepgram"),
+        VoiceOption("aura-2-asteria-en", "Asteria", "Feminine / Adult / US", "Clear, confident, knowledgeable, energetic", "deepgram"),
+        VoiceOption("aura-2-andromeda-en", "Andromeda", "Feminine / Adult / US", "Casual, expressive, comfortable", "deepgram"),
+        VoiceOption("aura-2-athena-en", "Athena", "Feminine / Mature / US", "Calm, smooth, professional", "deepgram"),
+        VoiceOption("aura-2-callista-en", "Callista", "Feminine / Adult / US", "Clear, energetic, professional, smooth", "deepgram"),
+        VoiceOption("aura-2-hera-en", "Hera", "Feminine / Adult / US", "Smooth, warm, professional", "deepgram"),
+        VoiceOption("aura-2-selene-en", "Selene", "Feminine / Adult / US", "Expressive, engaging, energetic", "deepgram"),
+        VoiceOption("aura-2-vesta-en", "Vesta", "Feminine / Adult / US", "Natural, expressive, patient, empathetic", "deepgram"),
+    ]
+    if configured:
+        return [
+            VoiceOption(**{**voice.to_dict(), "recommended": voice.model == configured})
+            for voice in voices
+        ]
+    return voices
 
 
 def _load_elevenlabs_voices(force_refresh: bool = False) -> list[VoiceOption]:

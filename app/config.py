@@ -26,6 +26,7 @@ class Settings:
     jobs_dir: Path = BASE_DIR / "data" / "jobs"
     brand_name: str = os.getenv("BRAND_NAME", "Saffron AI")
     default_language: str = os.getenv("DEFAULT_LANGUAGE", "English")
+    default_voice_provider: str = os.getenv("DEFAULT_VOICE_PROVIDER", "elevenlabs")
 
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -33,6 +34,8 @@ class Settings:
     elevenlabs_api_key: str | None = os.getenv("ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str | None = os.getenv("ELEVENLABS_VOICE_ID")
     elevenlabs_model_id: str = os.getenv("ELEVENLABS_MODEL_ID", "eleven_v3")
+    deepgram_api_key: str | None = os.getenv("DEEPGRAM_API_KEY")
+    deepgram_voice_id: str | None = os.getenv("DEEPGRAM_VOICE_ID")
 
     heygen_api_key: str | None = os.getenv("HEYGEN_API_KEY")
     heygen_avatar_id: str | None = os.getenv("HEYGEN_AVATAR_ID")

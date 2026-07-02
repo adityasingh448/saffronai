@@ -8,6 +8,8 @@ const result = document.querySelector("#result");
 const steps = Array.from(document.querySelectorAll(".step"));
 const voiceOptions = document.querySelector("#voice-options");
 const voiceStatus = document.querySelector("#voice-status");
+const voiceProviderInput = document.querySelector("#voice-provider");
+const voiceProviderOptions = document.querySelector("#voice-provider-options");
 const videoFormat = document.querySelector("#video-format");
 const maxMinutes = document.querySelector('input[name="max_minutes"]');
 const renderFps = document.querySelector("#render-fps");
@@ -28,6 +30,11 @@ let previewAudio = new Audio();
 let activePreviewButton = null;
 let statusReadFailures = 0;
 let activeJobId = localStorage.getItem("saffron_active_job") || "";
+let activeVoiceProvider = "elevenlabs";
+let voiceProviderMeta = {};
+let providerVoiceData = { elevenlabs: [], deepgram: [] };
+let defaultVoiceModels = { elevenlabs: "", deepgram: "" };
+let providerPreviewEnabled = { elevenlabs: false, deepgram: false };
 
 const RENDER_QUALITIES = [
   {
@@ -74,6 +81,9 @@ fpsOptions.querySelectorAll(".fps-pill").forEach((button) => {
     renderFps.value = button.dataset.fps || "30";
     renderFps.dispatchEvent(new Event("change", { bubbles: true }));
   });
+});
+voiceProviderOptions.querySelectorAll(".voice-provider-pill").forEach((button) => {
+  button.addEventListener("click", () => selectVoiceProvider(button.dataset.provider || "elevenlabs"));
 });
 
 fileInput.addEventListener("change", () => {
@@ -291,16 +301,29 @@ async function loadVoices() {
     const response = await fetch("/api/voices");
     if (!response.ok) throw new Error("Voice list failed");
     const payload = await response.json();
-    renderVoices(payload.voices || [], payload.default_voice_model, payload.preview_enabled);
+    voiceProviderMeta = Object.fromEntries((payload.providers || []).map((provider) => [provider.value, provider]));
+    providerVoiceData = payload.provider_voices || {
+      elevenlabs: payload.voices || [],
+      deepgram: [],
+    };
+    defaultVoiceModels = payload.defaults || {
+      elevenlabs: payload.default_voice_model || "",
+      deepgram: "",
+    };
+    providerPreviewEnabled =
+      typeof payload.preview_enabled === "object"
+        ? payload.preview_enabled
+        : { elevenlabs: Boolean(payload.preview_enabled), deepgram: false };
+    selectVoiceProvider(payload.default_provider || "elevenlabs");
   } catch (_error) {
-    voiceStatus.textContent = "ElevenLabs voices unavailable";
+    voiceStatus.textContent = "Voice modules unavailable";
     voiceOptions.innerHTML = `
       <div class="voice-card selected">
         <label class="voice-main">
           <input type="radio" name="voice_model" value="" checked />
           <span>
             <strong>Default voice</strong>
-            <em>ElevenLabs voice list could not load</em>
+            <em>Voice list could not load</em>
           </span>
         </label>
       </div>
@@ -308,21 +331,45 @@ async function loadVoices() {
   }
 }
 
-function renderVoices(voices, defaultVoiceModel, previewEnabled) {
+function selectVoiceProvider(provider) {
+  activeVoiceProvider = provider === "deepgram" ? "deepgram" : "elevenlabs";
+  voiceProviderInput.value = activeVoiceProvider;
+  voiceProviderOptions.querySelectorAll(".voice-provider-pill").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.provider === activeVoiceProvider);
+    const meta = voiceProviderMeta[button.dataset.provider] || {};
+    button.classList.toggle("not-configured", meta.configured === false);
+  });
+  renderVoices(
+    providerVoiceData[activeVoiceProvider] || [],
+    defaultVoiceModels[activeVoiceProvider] || "",
+    Boolean(providerPreviewEnabled[activeVoiceProvider]),
+    activeVoiceProvider,
+  );
+}
+
+function renderVoices(voices, defaultVoiceModel, previewEnabled, provider) {
   if (!voices.length) {
-    voiceStatus.textContent = "No ElevenLabs voices found";
+    voiceStatus.textContent = provider === "deepgram" ? "No Deepgram voices found" : "No ElevenLabs voices found";
+    voiceOptions.innerHTML = "";
     return;
   }
 
-  voiceStatus.textContent = previewEnabled ? "Tap play to preview" : "Preview unavailable";
+  const selectedVoiceModel = voices.some((voice) => voice.model === defaultVoiceModel) ? defaultVoiceModel : voices[0].model;
+  const providerLabel = provider === "deepgram" ? "Deepgram" : "ElevenLabs";
+  const configured = voiceProviderMeta[provider]?.configured !== false;
+  if (!configured) {
+    voiceStatus.textContent = `${providerLabel} API key needed`;
+  } else {
+    voiceStatus.textContent = previewEnabled ? `Preview ${providerLabel} voices` : `${providerLabel} preview unavailable`;
+  }
   voiceOptions.innerHTML = voices
     .map((voice) => {
-      const checked = voice.model === defaultVoiceModel ? "checked" : "";
+      const checked = voice.model === selectedVoiceModel ? "checked" : "";
       const selected = checked ? " selected" : "";
       const recommended = voice.recommended ? `<span class="voice-badge">Recommended</span>` : "";
       const disabled = previewEnabled ? "" : "disabled";
       return `
-        <div class="voice-card${selected}" data-model="${escapeHtml(voice.model)}">
+        <div class="voice-card${selected}" data-model="${escapeHtml(voice.model)}" data-provider="${escapeHtml(provider)}">
           <label class="voice-main">
             <input type="radio" name="voice_model" value="${escapeHtml(voice.model)}" ${checked} />
             <span>
@@ -365,6 +412,7 @@ function syncVoiceSelection() {
 async function playVoicePreview(button) {
   const model = button.dataset.model;
   if (!model) return;
+  const provider = button.closest(".voice-card")?.dataset.provider || activeVoiceProvider;
 
   if (activePreviewButton === button && !previewAudio.paused) {
     previewAudio.pause();
@@ -379,7 +427,9 @@ async function playVoicePreview(button) {
   button.textContent = "...";
 
   previewAudio.pause();
-  previewAudio = new Audio(`/api/voices/preview?voice_model=${encodeURIComponent(model)}`);
+  previewAudio = new Audio(
+    `/api/voices/preview?voice_provider=${encodeURIComponent(provider)}&voice_model=${encodeURIComponent(model)}`,
+  );
   previewAudio.addEventListener(
     "canplay",
     () => {

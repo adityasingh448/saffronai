@@ -469,6 +469,44 @@ button:disabled {
   padding: 0 4px 2px 0;
 }
 
+.voice-provider-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: #f7f8fb;
+}
+
+.voice-provider-pill {
+  min-height: 38px;
+  border: 0;
+  border-radius: calc(var(--control-radius) - 3px);
+  background: transparent;
+  color: #79818d;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 0 12px;
+}
+
+.voice-provider-pill.selected {
+  background: #111214;
+  color: #ffffff;
+}
+
+.voice-provider-pill.not-configured:not(.selected) {
+  color: #a7adb6;
+}
+
+.voice-provider-pill:hover,
+.voice-provider-pill:active {
+  transform: none;
+  box-shadow: none;
+}
+
 .voice-card {
   position: relative;
   min-height: 72px;

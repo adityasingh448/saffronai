@@ -13,7 +13,7 @@ import requests
 from mutagen import File as MutagenFile
 
 from app.config import settings
-from app.voices import get_voice, resolve_voice_model
+from app.voices import get_voice, normalize_voice_provider, resolve_voice_model
 
 
 VOICE_PREVIEW_TEXT = (
@@ -22,11 +22,23 @@ VOICE_PREVIEW_TEXT = (
 )
 
 
-def synthesize_voiceover(script_text: str, job_dir: Path, voice_model: str | None = None) -> tuple[Path, str]:
+def synthesize_voiceover(
+    script_text: str,
+    job_dir: Path,
+    voice_model: str | None = None,
+    voice_provider: str = "elevenlabs",
+) -> tuple[Path, str]:
     script_path = job_dir / "voiceover-script.txt"
     script_path.write_text(script_text, encoding="utf-8")
 
-    selected_voice_id = resolve_voice_model(voice_model)
+    provider = normalize_voice_provider(voice_provider)
+    selected_voice_id = resolve_voice_model(voice_model, provider=provider)
+
+    if provider == "deepgram":
+        if not settings.deepgram_api_key:
+            raise RuntimeError("Please add a Deepgram API key before creating the video with Deepgram.")
+        return _synthesize_with_deepgram(script_text, job_dir, selected_voice_id), "deepgram"
+
     if settings.elevenlabs_api_key:
         if not selected_voice_id:
             raise RuntimeError("Please choose an ElevenLabs voice before creating the video.")
@@ -41,11 +53,22 @@ def synthesize_voiceover(script_text: str, job_dir: Path, voice_model: str | Non
     return _create_silent_audio(script_text, job_dir), "silent-demo"
 
 
-def synthesize_voice_preview(voice_model: str, output_path: Path) -> Path:
+def synthesize_voice_preview(voice_model: str, output_path: Path, voice_provider: str = "elevenlabs") -> Path:
+    provider = normalize_voice_provider(voice_provider)
+    if provider == "deepgram":
+        if not settings.deepgram_api_key:
+            raise RuntimeError("Deepgram is not configured.")
+        selected_voice = get_voice(voice_model, provider=provider)
+        if not selected_voice:
+            raise RuntimeError("Unknown Deepgram voice.")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        _request_deepgram_audio(VOICE_PREVIEW_TEXT, output_path, selected_voice.model)
+        return output_path
+
     if not settings.elevenlabs_api_key:
         raise RuntimeError("ElevenLabs is not configured.")
 
-    selected_voice = get_voice(voice_model)
+    selected_voice = get_voice(voice_model, provider=provider)
     if not selected_voice:
         raise RuntimeError("Unknown ElevenLabs voice.")
 
@@ -102,6 +125,24 @@ def _synthesize_with_elevenlabs(script_text: str, job_dir: Path, voice_id: str) 
     return output_path
 
 
+def _synthesize_with_deepgram(script_text: str, job_dir: Path, voice_model: str) -> Path:
+    output_path = job_dir / "voiceover.mp3"
+    tts_text = _prepare_deepgram_text(script_text)
+    chunks = _split_tts_text(tts_text, limit=1800)
+
+    if len(chunks) == 1:
+        _request_deepgram_audio(chunks[0], output_path, voice_model)
+        return output_path
+
+    part_paths: list[Path] = []
+    for index, chunk in enumerate(chunks, start=1):
+        part_path = job_dir / f"voiceover-deepgram-part-{index:02d}.mp3"
+        _request_deepgram_audio(chunk, part_path, voice_model)
+        part_paths.append(part_path)
+    _concat_audio_parts(part_paths, output_path)
+    return output_path
+
+
 def _run_elevenlabs_requests_in_parallel(
     jobs: list[tuple[str, Path, str, str | None, str | None]],
 ) -> None:
@@ -147,6 +188,15 @@ def _prepare_elevenlabs_text(script_text: str) -> str:
         normalized.append(paragraph)
 
     return "\n\n".join(normalized)
+
+
+def _prepare_deepgram_text(script_text: str) -> str:
+    text = _prepare_elevenlabs_text(script_text)
+    text = re.sub(r"\.\.\.+", "...", text)
+    text = re.sub(r"\bFirst point:", "First point.", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bNext point:", "Next point.", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def _ffmpeg_audio_duration_seconds(audio_path: Path) -> float | None:
@@ -220,6 +270,29 @@ def _request_elevenlabs_audio(
     output_path.write_bytes(response.content)
 
 
+def _request_deepgram_audio(script_text: str, output_path: Path, voice_model: str) -> None:
+    response = requests.post(
+        "https://api.deepgram.com/v1/speak",
+        headers={
+            "Authorization": f"Token {settings.deepgram_api_key}",
+            "Content-Type": "application/json",
+        },
+        params={"model": voice_model},
+        json={"text": script_text},
+        timeout=180,
+    )
+    if response.status_code >= 400:
+        detail = _safe_deepgram_response_detail(response)
+        raise RuntimeError(f"Deepgram voice generation failed ({response.status_code}): {detail}")
+
+    content_type = response.headers.get("content-type", "")
+    if not response.content or "audio" not in content_type.lower():
+        detail = _safe_deepgram_response_detail(response)
+        raise RuntimeError(f"Deepgram did not return audio for the selected voice. {detail}")
+
+    output_path.write_bytes(response.content)
+
+
 def _post_elevenlabs_tts(url: str, payload: dict) -> requests.Response:
     response = requests.post(
         url,
@@ -242,6 +315,18 @@ def _safe_response_detail(response: requests.Response) -> str:
     text = str(detail)
     if settings.elevenlabs_api_key:
         text = text.replace(settings.elevenlabs_api_key, "[hidden]")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:700] or "No error details returned."
+
+
+def _safe_deepgram_response_detail(response: requests.Response) -> str:
+    try:
+        detail = response.json()
+    except ValueError:
+        detail = response.text
+    text = str(detail)
+    if settings.deepgram_api_key:
+        text = text.replace(settings.deepgram_api_key, "[hidden]")
     text = re.sub(r"\s+", " ", text).strip()
     return text[:700] or "No error details returned."
 

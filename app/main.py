@@ -35,7 +35,16 @@ from app.text_script_writer import write_text_walkthrough_script
 from app.text_slides import create_text_slides
 from app.text_tools import extract_text_document, is_pdf_filename, source_storage_name
 from app.video import compose_walkthrough_video, overlay_avatar_video
-from app.voices import default_voice_model, get_voice, resolve_voice_model, voice_label, voice_options
+from app.voices import (
+    default_voice_model,
+    default_voice_provider,
+    get_voice,
+    normalize_voice_provider,
+    resolve_voice_model,
+    voice_label,
+    voice_options,
+    voice_provider_options,
+)
 
 
 STATIC_DIR = settings.base_dir / "app" / "static"
@@ -95,6 +104,7 @@ def health() -> dict:
         "brand": settings.brand_name,
         "openai": bool(settings.openai_api_key),
         "elevenlabs": bool(settings.elevenlabs_api_key),
+        "deepgram": bool(settings.deepgram_api_key),
         "heygen": can_use_heygen(),
         "hyperframes": can_use_hyperframes(),
         "remotion": can_use_remotion(),
@@ -104,10 +114,24 @@ def health() -> dict:
 
 @app.get("/api/voices")
 def list_voices() -> dict:
+    default_provider = default_voice_provider()
     return {
-        "default_voice_model": default_voice_model(),
-        "voices": voice_options(force_refresh=True),
-        "preview_enabled": bool(settings.elevenlabs_api_key),
+        "default_provider": default_provider,
+        "providers": voice_provider_options(),
+        "default_voice_model": default_voice_model(default_provider),
+        "voices": voice_options(force_refresh=True, provider=default_provider),
+        "provider_voices": {
+            "elevenlabs": voice_options(force_refresh=True, provider="elevenlabs"),
+            "deepgram": voice_options(force_refresh=True, provider="deepgram"),
+        },
+        "preview_enabled": {
+            "elevenlabs": bool(settings.elevenlabs_api_key),
+            "deepgram": bool(settings.deepgram_api_key),
+        },
+        "defaults": {
+            "elevenlabs": default_voice_model("elevenlabs"),
+            "deepgram": default_voice_model("deepgram"),
+        },
     }
 
 
@@ -128,17 +152,23 @@ def list_render_options(
 
 
 @app.get("/api/voices/preview")
-def voice_preview(voice_model: str = Query(..., min_length=3)) -> FileResponse:
-    selected_voice = get_voice(voice_model)
+def voice_preview(
+    voice_model: str = Query(..., min_length=3),
+    voice_provider: str = Query("elevenlabs"),
+) -> FileResponse:
+    provider = normalize_voice_provider(voice_provider)
+    selected_voice = get_voice(voice_model, provider=provider)
     if not selected_voice:
         raise HTTPException(status_code=400, detail="Unknown voice option.")
-    if not settings.elevenlabs_api_key:
+    if provider == "deepgram" and not settings.deepgram_api_key:
+        raise HTTPException(status_code=503, detail="Deepgram is not configured.")
+    if provider == "elevenlabs" and not settings.elevenlabs_api_key:
         raise HTTPException(status_code=503, detail="ElevenLabs is not configured.")
 
     safe_name = selected_voice.model.replace("/", "-").replace("\\", "-")
-    preview_path = settings.data_dir / "voice-previews" / f"{safe_name}.mp3"
+    preview_path = settings.data_dir / "voice-previews" / provider / f"{safe_name}.mp3"
     if not preview_path.exists() or preview_path.stat().st_size <= 0:
-        synthesize_voice_preview(selected_voice.model, preview_path)
+        synthesize_voice_preview(selected_voice.model, preview_path, voice_provider=provider)
 
     return FileResponse(preview_path, media_type="audio/mpeg", filename=f"{selected_voice.name}-preview.mp3")
 
@@ -155,6 +185,7 @@ async def create_job(
     video_format: str = Form("horizontal"),
     render_quality: str = Form("720p"),
     render_fps: int = Form(30),
+    voice_provider: str = Form("elevenlabs"),
     voice_model: str = Form(""),
 ) -> dict:
     source_filename = pdf.filename or "source.txt"
@@ -165,6 +196,10 @@ async def create_job(
     safe_video_format = _normalize_video_format(video_format)
     safe_quality = normalize_render_quality(render_quality)
     safe_fps = normalize_render_fps(render_fps)
+    safe_voice_provider = normalize_voice_provider(voice_provider)
+    if safe_voice_provider == "deepgram" and not settings.deepgram_api_key:
+        raise HTTPException(status_code=400, detail="Deepgram API key is not configured.")
+    safe_voice_model = resolve_voice_model(voice_model, provider=safe_voice_provider)
     render_width, render_height = render_dimensions(safe_video_format, safe_quality)
     estimated_render_seconds = estimate_render_seconds(safe_max_minutes, safe_quality, safe_fps)
 
@@ -193,7 +228,8 @@ async def create_job(
             "render_width": render_width,
             "render_height": render_height,
             "estimated_render_seconds": estimated_render_seconds,
-            "voice_model": resolve_voice_model(voice_model),
+            "voice_provider": safe_voice_provider,
+            "voice_model": safe_voice_model,
             "filename": source_filename,
             "source_file": source_file,
             "source_type": source_type,
@@ -325,8 +361,14 @@ def _run_pipeline(job_id: str) -> None:
         (job_dir / "script.json").write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
         _set_stage(job_id, "running", "Generating voiceover audio", progress_percent=40)
-        selected_voice_model = resolve_voice_model(inputs.get("voice_model", ""))
-        audio_path, audio_source = synthesize_voiceover(script.full_script, job_dir, voice_model=selected_voice_model)
+        selected_voice_provider = normalize_voice_provider(inputs.get("voice_provider", "elevenlabs"))
+        selected_voice_model = resolve_voice_model(inputs.get("voice_model", ""), provider=selected_voice_provider)
+        audio_path, audio_source = synthesize_voiceover(
+            script.full_script,
+            job_dir,
+            voice_model=selected_voice_model,
+            voice_provider=selected_voice_provider,
+        )
 
         requested_avatar_mode = inputs.get("avatar_mode", "off")
         render_avatar_mode = requested_avatar_mode
@@ -455,8 +497,9 @@ def _run_pipeline(job_id: str) -> None:
             "source_type": source_type,
             "script_source": script.source,
             "audio_source": audio_source,
+            "voice_provider": selected_voice_provider,
             "voice_model": selected_voice_model,
-            "voice_label": voice_label(selected_voice_model),
+            "voice_label": voice_label(selected_voice_model, provider=selected_voice_provider),
             "avatar_mode": avatar_source,
             "video_renderer": video_renderer_used,
             "video_format": inputs.get("video_format", "horizontal"),
