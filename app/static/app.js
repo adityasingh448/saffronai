@@ -77,7 +77,7 @@ fpsOptions.querySelectorAll(".fps-pill").forEach((button) => {
 });
 
 fileInput.addEventListener("change", () => {
-  fileLabel.textContent = fileInput.files[0]?.name || "Drop or choose report PDF";
+  fileLabel.textContent = fileInput.files[0]?.name || "Drop or choose PDF, TXT, or MD";
 });
 
 form.addEventListener("submit", async (event) => {
@@ -85,12 +85,12 @@ form.addEventListener("submit", async (event) => {
   clearInterval(pollTimer);
   statusReadFailures = 0;
   setBusy(true);
-  setStatus("queued", "Uploading report");
+  setStatus("queued", "Uploading source file");
   markStep("pdf");
   updateProgress({
     progress: {
       percent: 0,
-      label: "Uploading report",
+      label: "Uploading source file",
       detail: selectedRenderSummary(),
       eta_label: "ETA calculating",
     },

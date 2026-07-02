@@ -413,7 +413,7 @@ const PointerStrip: React.FC<{
       }}
     >
       <span style={{color: SAFFRON}}>
-        Page {pageNumber} / {total}
+        Section {pageNumber} / {total}
       </span>
       <span style={{flex: 1, color: INK}}>
         Point {pointerIndex + 1}: {trim(cleanLabel(pointer.label), 76)}

@@ -31,6 +31,9 @@ from app.render_options import (
     render_dimensions,
 )
 from app.script_writer import write_walkthrough_script
+from app.text_script_writer import write_text_walkthrough_script
+from app.text_slides import create_text_slides
+from app.text_tools import extract_text_document, is_pdf_filename, source_storage_name
 from app.video import compose_walkthrough_video, overlay_avatar_video
 from app.voices import default_voice_model, get_voice, resolve_voice_model, voice_label, voice_options
 
@@ -154,8 +157,9 @@ async def create_job(
     render_fps: int = Form(30),
     voice_model: str = Form(""),
 ) -> dict:
-    if not pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Please upload a PDF report.")
+    source_filename = pdf.filename or "source.txt"
+    source_type = "pdf" if is_pdf_filename(source_filename) else "text"
+    source_file = source_storage_name(source_filename)
 
     safe_max_minutes = normalize_target_minutes(max_minutes)
     safe_video_format = _normalize_video_format(video_format)
@@ -168,8 +172,8 @@ async def create_job(
     job_dir = _job_dir(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_path = job_dir / "input.pdf"
-    with pdf_path.open("wb") as output:
+    source_path = job_dir / source_file
+    with source_path.open("wb") as output:
         shutil.copyfileobj(pdf.file, output)
 
     metadata = {
@@ -190,7 +194,9 @@ async def create_job(
             "render_height": render_height,
             "estimated_render_seconds": estimated_render_seconds,
             "voice_model": resolve_voice_model(voice_model),
-            "filename": pdf.filename,
+            "filename": source_filename,
+            "source_file": source_file,
+            "source_type": source_type,
         },
         "progress": _progress_payload(
             percent=0,
@@ -275,23 +281,45 @@ def _progress_payload(
 
 def _run_pipeline(job_id: str) -> None:
     job_dir = _job_dir(job_id)
-    pdf_path = job_dir / "input.pdf"
 
     try:
         job = _read_job(job_id)
         inputs = job["inputs"]
+        source_type = str(inputs.get("source_type") or "pdf")
+        source_path = job_dir / str(inputs.get("source_file") or "input.pdf")
 
-        _set_stage(job_id, "running", "Reading and rendering PDF pages", progress_percent=8)
-        pages = extract_pdf_pages(pdf_path, job_dir / "pages")
+        if source_type == "pdf":
+            _set_stage(job_id, "running", "Reading and rendering PDF pages", progress_percent=8)
+            pages = extract_pdf_pages(source_path, job_dir / "pages")
 
-        _set_stage(job_id, "running", "Writing voiceover script", progress_percent=24)
-        script = write_walkthrough_script(
-            pages=pages,
-            prospect_name=inputs.get("prospect_name", ""),
-            target_company=inputs.get("target_company", ""),
-            language=inputs.get("language", settings.default_language),
-            max_minutes=int(inputs.get("max_minutes", 3)),
-        )
+            _set_stage(job_id, "running", "Writing voiceover script", progress_percent=24)
+            script = write_walkthrough_script(
+                pages=pages,
+                prospect_name=inputs.get("prospect_name", ""),
+                target_company=inputs.get("target_company", ""),
+                language=inputs.get("language", settings.default_language),
+                max_minutes=int(inputs.get("max_minutes", 3)),
+            )
+            page_images = [page.image_path for page in pages]
+            page_highlights = [page.highlights for page in pages]
+            source_units = len(pages)
+            source_title = "Prospect report"
+        else:
+            _set_stage(job_id, "running", "Reading source file", progress_percent=8)
+            document = extract_text_document(source_path, source_name=str(inputs.get("filename") or source_path.name))
+
+            _set_stage(job_id, "running", "Writing voiceover script", progress_percent=24)
+            script = write_text_walkthrough_script(
+                document=document,
+                prospect_name=inputs.get("prospect_name", ""),
+                target_company=inputs.get("target_company", ""),
+                language=inputs.get("language", settings.default_language),
+                max_minutes=int(inputs.get("max_minutes", 3)),
+            )
+            page_images, page_highlights = create_text_slides(document, script.page_scripts, job_dir / "text-slides")
+            source_units = len(page_images)
+            source_title = document.title
+
         script_path = job_dir / "voiceover-script.txt"
         script_path.write_text(script.full_script, encoding="utf-8")
         (job_dir / "script.json").write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -309,9 +337,7 @@ def _run_pipeline(job_id: str) -> None:
             avatar_source = "heygen" if can_use_heygen() else "local-fallback"
 
         base_video_path = job_dir / ("walkthrough-base.mp4" if requested_avatar_mode == "heygen" and can_use_heygen() else "walkthrough.mp4")
-        prospect_label = inputs.get("target_company") or inputs.get("prospect_name") or "Prospect report"
-        page_images = [page.image_path for page in pages]
-        page_highlights = [page.highlights for page in pages]
+        prospect_label = inputs.get("target_company") or inputs.get("prospect_name") or source_title
         render_quality = normalize_render_quality(str(inputs.get("render_quality", "720p")))
         render_fps = normalize_render_fps(inputs.get("render_fps", 30))
         render_width, render_height = render_dimensions(inputs.get("video_format", "horizontal"), render_quality)
@@ -425,7 +451,8 @@ def _run_pipeline(job_id: str) -> None:
             job["artifacts"]["heygen_avatar"] = heygen_result.local_path.name
             job["artifacts"]["heygen_video_url"] = heygen_result.video_url
         job["summary"] = {
-            "pages": len(pages),
+            "pages": source_units,
+            "source_type": source_type,
             "script_source": script.source,
             "audio_source": audio_source,
             "voice_model": selected_voice_model,

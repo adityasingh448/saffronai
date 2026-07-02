@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Saffron AI Sales Automation Agent</title>
-    <link rel="stylesheet" href="styles.css?v=render-quality-flat-1" />
+    <link rel="stylesheet" href="styles.css?v=text-file-experiment-1" />
   </head>
   <body>
     <header class="site-nav">
@@ -17,8 +17,8 @@
     <main class="shell">
       <section class="hero">
         <div class="hero-badge"><span>New</span> AI report video agent</div>
-        <h1>Turn PDF Reports into Clear Explanation Videos</h1>
-        <p>Upload a report, choose a natural male voice, and generate a polished walkthrough with clear zooms on important topics.</p>
+        <h1>Turn Reports into Clear Explanation Videos</h1>
+        <p>Upload a PDF, TXT, or MD file, choose a natural male voice, and generate a polished walkthrough with clear zooms on important topics.</p>
       </section>
 
       <section class="workspace">
@@ -28,8 +28,8 @@
           <input type="hidden" name="avatar_mode" value="off" />
 
           <label class="file-drop" for="pdf">
-            <input id="pdf" name="pdf" type="file" accept="application/pdf" required />
-            <span id="file-label">Drop or choose report PDF</span>
+            <input id="pdf" name="pdf" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.json,.html,.htm,.rtf,.docx,text/plain,text/markdown,application/pdf" required />
+            <span id="file-label">Drop or choose PDF, TXT, or MD</span>
           </label>
 
           <div class="grid">
@@ -126,13 +126,13 @@
         <div class="status-card">
           <div>
             <p class="eyebrow">Pipeline</p>
-            <h2 id="stage">Ready for a PDF</h2>
+            <h2 id="stage">Ready for a source file</h2>
           </div>
           <span id="status-pill" class="pill">Idle</span>
         </div>
 
         <div class="steps">
-          <div class="step" data-step="pdf">PDF analysis</div>
+          <div class="step" data-step="pdf">File analysis</div>
           <div class="step" data-step="script">Voiceover script</div>
           <div class="step" data-step="audio">ElevenLabs voice</div>
           <div class="step" data-step="video">Video render</div>
@@ -162,6 +162,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=render-quality-card-3"></script>
+    <script src="app.js?v=text-file-experiment-1"></script>
   </body>
 </html>
