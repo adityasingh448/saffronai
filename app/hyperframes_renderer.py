@@ -299,6 +299,7 @@ def _build_index_html(
     for index, image_path in enumerate(page_images):
         script = page_scripts[min(index, len(page_scripts) - 1)] if page_scripts else None
         highlights = page_highlights[index] if index < len(page_highlights) else []
+        highlights = _relabeled_highlights(highlights, script.highlight_terms if script else [])
         focus = script.focus if script else f"Page {index + 1}"
         targets = _focus_targets(image_path, highlights, layout, index + 1)
         scenes.append(
@@ -698,14 +699,7 @@ def _build_index_html(
 
 
 def _scene_html(scene: dict[str, object], targets: list[dict[str, object]]) -> str:
-    lines = "\n".join(
-        (
-            f'              <div id="{escape(str(target["id"]))}" class="marker-line" '
-            f'style="left: {target["x"]}px; top: {target["y"]}px; '
-            f'width: {target["width"]}px; height: {target["height"]}px;"></div>'
-        )
-        for target in targets
-    )
+    lines = ""
     return f"""      <div id="{scene["id"]}" class="clip page-scene" data-start="{scene["start"]:.3f}" data-duration="{scene["duration"]:.3f}" data-track-index="{scene["track"]}">
         <div class="scene-content">
           <div class="scene-header">
@@ -758,6 +752,22 @@ def _insight_note(focus: str, highlights: list[HighlightBox]) -> str:
         label = _trim(highlights[0].label, 74)
         return f"This point around {label} shows where your team can focus next."
     return _trim(focus, 130) or "This report section helps your team choose the next practical action."
+
+
+def _relabeled_highlights(highlights: list[HighlightBox], labels: list[str]) -> list[HighlightBox]:
+    clean_labels = [_trim(label, 90) for label in labels if _trim(label, 90)]
+    if not clean_labels:
+        return highlights
+    return [
+        HighlightBox(
+            x0=item.x0,
+            y0=item.y0,
+            x1=item.x1,
+            y1=item.y1,
+            label=clean_labels[index] if index < len(clean_labels) else item.label,
+        )
+        for index, item in enumerate(highlights)
+    ]
 
 
 def _focus_targets(
@@ -832,7 +842,6 @@ def _camera_moves(
                 "x": round(x, 2),
                 "y": round(y, 2),
                 "scale": round(scale, 3),
-                "markerId": target["id"],
                 "ease": "sine.inOut",
             }
         )

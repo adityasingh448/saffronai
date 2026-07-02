@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -32,7 +33,19 @@ class PdfPage:
 
 def clean_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text or "").strip()
+    text = _normalize_report_terms(text)
     return text
+
+
+def _normalize_report_terms(text: str) -> str:
+    normalized = text or ""
+    normalized = re.sub(r"\bOn\s*[-–—]?\s*[1lI]\s+Page\s+SEO\b", "On-Page SEO", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bOn\s+Page\s+SEO\b", "On-Page SEO", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bOn\s*[-–—]\s*Page\s+SEO\b", "On-Page SEO", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bOff\s*[-–—]?\s*Page\s+SEO\b", "Off-Page SEO", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bog\s*image\s*alt\s*attribute\b", "OG image alt attribute", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bog\s*description\b", "OG description", normalized, flags=re.IGNORECASE)
+    return normalized
 
 
 def extract_pdf_pages(pdf_path: Path, output_dir: Path, max_pages: int = 24) -> list[PdfPage]:
@@ -56,6 +69,17 @@ def extract_pdf_pages(pdf_path: Path, output_dir: Path, max_pages: int = 24) -> 
             image_path = output_dir / f"page-{page_number:02d}.png"
             pixmap.save(str(image_path))
 
+            if _needs_ocr(text, lines):
+                ocr_lines, ocr_boxes = _extract_ocr_text(image_path)
+                if ocr_lines:
+                    text = clean_text("\n".join(ocr_lines))
+                    lines = ocr_lines
+                    ocr_heading, ocr_heading_box = _extract_ocr_heading(ocr_boxes)
+                    if ocr_heading:
+                        heading = ocr_heading
+                        heading_box = ocr_heading_box
+                    highlights = _merge_highlight_boxes(heading_box, _select_ocr_highlights(ocr_boxes))
+
             pages.append(
                 PdfPage(
                     page_number=page_number,
@@ -73,6 +97,11 @@ def extract_pdf_pages(pdf_path: Path, output_dir: Path, max_pages: int = 24) -> 
 
     if not pages:
         raise ValueError("The PDF did not contain any readable pages.")
+    if not any(page.text for page in pages):
+        raise ValueError(
+            "The PDF appears to be image-only and OCR text could not be extracted. "
+            "Please install the OCR dependency or upload a text-based PDF."
+        )
 
     return pages
 
@@ -93,6 +122,152 @@ def _extract_text_lines(raw_text: str) -> list[str]:
         if cleaned:
             lines.append(cleaned)
     return lines
+
+
+def _needs_ocr(text: str, lines: list[str]) -> bool:
+    word_count = len(re.findall(r"[A-Za-z0-9]+", text or ""))
+    return word_count < 8 and len(lines) < 3
+
+
+@lru_cache(maxsize=1)
+def _ocr_engine():
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except Exception:
+        return None
+
+    try:
+        return RapidOCR()
+    except Exception as exc:
+        print(f"OCR engine could not start: {exc}")
+        return None
+
+
+def _extract_ocr_text(image_path: Path) -> tuple[list[str], list[HighlightBox]]:
+    engine = _ocr_engine()
+    if not engine:
+        return [], []
+
+    try:
+        result, _ = engine(str(image_path))
+    except Exception as exc:
+        print(f"OCR failed for {image_path.name}: {exc}")
+        return [], []
+
+    boxes: list[HighlightBox] = []
+    for item in result or []:
+        if len(item) < 3:
+            continue
+        points, label, confidence = item[0], _clean_ocr_text(str(item[1])), item[2]
+        try:
+            score = float(confidence)
+        except Exception:
+            score = 0.0
+        if score < 0.45 or not label:
+            continue
+        try:
+            xs = [float(point[0]) for point in points]
+            ys = [float(point[1]) for point in points]
+        except Exception:
+            continue
+        boxes.append(HighlightBox(x0=min(xs), y0=min(ys), x1=max(xs), y1=max(ys), label=label))
+
+    boxes.sort(key=lambda item: (item.y0, item.x0))
+    lines = [box.label for box in boxes if _is_ocr_line_candidate(box.label)]
+    return lines, boxes
+
+
+def _clean_ocr_text(text: str) -> str:
+    text = clean_text(text.replace("�", "/"))
+    replacements = {
+        "Fullentitycard": "Full entity card",
+        "BCGinthe": "BCG in the",
+        "SERPforitsbrand": "SERP for its brand",
+        "Al Overview": "AI Overview",
+        "Overviewcites": "Overview cites",
+        "GEOsignals": "GEO signals",
+        "Nostructureddata": "No structured data",
+        "schemamarkupdetected": "schema markup detected",
+        "entirehomepagehaszero": "entire homepage has zero",
+        "JSON-LDormicrodata": "JSON-LD or microdata",
+        "internallinksonhomepage": "internal links on homepage",
+        "Thisisveryhigh": "This is very high",
+        "Whilemostarenavigational": "While most are navigational",
+        "excessiveinternallinksdilute": "excessive internal links dilute",
+        "nofavicon": "no favicon",
+        "Nofavicondetected": "No favicon detected",
+        "SEOcheckflagged": "SEO check flagged",
+        "ogdescription": "OG description",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    text = re.sub(r"\bA[lI]\s+Overview\b", "AI Overview", text)
+    text = re.sub(r"cites([A-Za-z0-9.-]+)asareferencesource", r"cites \1 as a reference source", text)
+    text = re.sub(r"(\d+)\.(?=[A-Za-z])", r"\1. ", text)
+    text = re.sub(r"\.(?=[A-Z])", ". ", text)
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    text = re.sub(r"([A-Za-z])(\d)", r"\1 \2", text)
+    text = re.sub(r"(\d)([A-Za-z])", r"\1 \2", text)
+    text = re.sub(r":(?=\S)", ": ", text)
+    text = re.sub(r",(?=\S)", ", ", text)
+    text = re.sub(r"(?<=[a-zA-Z])/(?=[A-Za-z])", " / ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _is_ocr_line_candidate(text: str) -> bool:
+    normalized = _normalize_label(text)
+    if not normalized:
+        return False
+    if normalized in {"saffronedge", "saffronai", "saffronos", "page", "wwwsaffronedgecom"}:
+        return False
+    if re.search(r"https?://|www\.|@", text, flags=re.IGNORECASE):
+        return False
+    return bool(re.search(r"[A-Za-z0-9]", text))
+
+
+def _extract_ocr_heading(boxes: list[HighlightBox]) -> tuple[str, HighlightBox | None]:
+    candidates: list[tuple[float, HighlightBox]] = []
+    for order, box in enumerate(boxes[:16]):
+        if not _is_heading_candidate(box.label):
+            continue
+        score = _highlight_score(box.label, order) + max(0, 16 - order) * 0.35
+        candidates.append((score, box))
+    if not candidates:
+        return "", None
+    _, heading_box = max(candidates, key=lambda item: item[0])
+    return heading_box.label, heading_box
+
+
+def _select_ocr_highlights(boxes: list[HighlightBox]) -> list[HighlightBox]:
+    candidates: list[tuple[float, float, HighlightBox]] = []
+    for order, box in enumerate(boxes):
+        if not _is_ocr_highlight_candidate(box.label):
+            continue
+        score = _highlight_score(box.label, order)
+        candidates.append((score, box.y0, box))
+
+    if not candidates:
+        candidates = [
+            (max(0, 8 - order) * 0.1, box.y0, box)
+            for order, box in enumerate(boxes[:8])
+            if _is_ocr_line_candidate(box.label)
+        ]
+
+    top_candidates = sorted(candidates, key=lambda item: item[0], reverse=True)[:24]
+    top_candidates.sort(key=lambda item: (item[2].y0, item[2].x0))
+    return [item[2] for item in top_candidates]
+
+
+def _is_ocr_highlight_candidate(text: str) -> bool:
+    if not _is_ocr_line_candidate(text):
+        return False
+    words = [_normalize_word(word) for word in text.split()]
+    return (
+        _is_heading_candidate(text)
+        or any(word in IMPORTANT_TERMS for word in words)
+        or bool(re.search(r"\d|%|/100|score", text, flags=re.IGNORECASE))
+    )
 
 
 def _extract_page_heading(page: fitz.Page, render_scale: float) -> tuple[str, HighlightBox | None]:
@@ -175,7 +350,7 @@ def _merge_highlight_boxes(heading_box: HighlightBox | None, highlights: list[Hi
     for highlight in highlights:
         if not _is_duplicate_box(highlight, merged):
             merged.append(highlight)
-        if len(merged) >= 12:
+        if len(merged) >= 28:
             break
 
     return merged
@@ -204,7 +379,7 @@ def _is_heading_candidate(text: str) -> bool:
     normalized = _normalize_label(text)
     if len(text) < 4 or len(text) > 120 or len(words) > 18:
         return False
-    if normalized in {"saffronedge", "saffronai", "page", "wwwsaffronedgecom"}:
+    if normalized in {"saffronedge", "saffronai", "saffronos", "page", "wwwsaffronedgecom"}:
         return False
     if re.fullmatch(r"(page\s*)?\d+(\s*/\s*\d+)?", text, flags=re.IGNORECASE):
         return False
@@ -247,7 +422,7 @@ def _extract_highlight_boxes(page: fitz.Page, render_scale: float) -> list[Highl
         score = _highlight_score(label, order)
         candidates.append((score, y0, HighlightBox(x0=x0, y0=y0, x1=x1, y1=y1, label=label)))
 
-    top_candidates = sorted(candidates, key=lambda item: item[0], reverse=True)[:12]
+    top_candidates = sorted(candidates, key=lambda item: item[0], reverse=True)[:24]
     top_candidates.sort(key=lambda item: (item[2].y0, item[2].x0))
     return [item[2] for item in top_candidates]
 

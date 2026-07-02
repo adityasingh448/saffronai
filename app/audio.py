@@ -17,7 +17,7 @@ from app.voices import get_voice, resolve_voice_model
 
 
 VOICE_PREVIEW_TEXT = (
-    "[warm, energetic, confident] Hi, this is a short preview of the report walkthrough voice. "
+    "Hi, this is a short preview of the report walkthrough voice. "
     "I will explain each point clearly... what it means for your team, why it matters, and what you can improve next."
 )
 
@@ -27,11 +27,10 @@ def synthesize_voiceover(script_text: str, job_dir: Path, voice_model: str | Non
     script_path.write_text(script_text, encoding="utf-8")
 
     selected_voice_id = resolve_voice_model(voice_model)
-    if settings.elevenlabs_api_key and selected_voice_id:
-        try:
-            return _synthesize_with_elevenlabs(script_text, job_dir, selected_voice_id), "elevenlabs"
-        except Exception as exc:
-            print(f"ElevenLabs synthesis failed, falling back locally: {exc}")
+    if settings.elevenlabs_api_key:
+        if not selected_voice_id:
+            raise RuntimeError("Please choose an ElevenLabs voice before creating the video.")
+        return _synthesize_with_elevenlabs(script_text, job_dir, selected_voice_id), "elevenlabs"
 
     if platform.system().lower() == "windows":
         try:
@@ -135,14 +134,19 @@ def _prepare_elevenlabs_text(script_text: str) -> str:
         paragraph = re.sub(r"\s+", " ", paragraph).strip()
         paragraph = re.sub(r"\bPoint\s+(\d+):", r"Point \1. ", paragraph)
         paragraph = paragraph.replace("Now, here is", "Now... here is")
-        paragraph = paragraph.replace("So the recommendation is simple:", "So, the recommendation is simple.")
-        paragraph = paragraph.replace("This is not just an observation;", "This is not just an observation... ")
-        paragraph = re.sub(r"\bSEO\b", "S E O", paragraph)
-        paragraph = re.sub(r"\bCTR\b", "C T R", paragraph)
-        paragraph = re.sub(r"\bCPC\b", "C P C", paragraph)
+        paragraph = re.sub(r"\b(\d{1,3})\s*/\s*100\b", r"\1 out of 100", paragraph)
+        paragraph = re.sub(r"\bSEO\b", "Search Engine Optimization", paragraph)
+        paragraph = re.sub(r"\bAEO\b", "Answer Engine Optimization", paragraph)
+        paragraph = re.sub(r"\bGEO\b", "Generative Engine Optimization", paragraph)
+        paragraph = re.sub(r"\bSERP\b", "Search Engine Results Page", paragraph)
+        paragraph = re.sub(r"\bCTR\b", "click-through rate", paragraph)
+        paragraph = re.sub(r"\bCPC\b", "cost per click", paragraph)
+        paragraph = re.sub(r"\bOG\b", "Open Graph", paragraph)
+        paragraph = re.sub(r"\bHQ\b", "headquarters", paragraph)
+        paragraph = re.sub(r"\bCEO\b", "chief executive officer", paragraph)
         normalized.append(paragraph)
 
-    return "[warm, energetic, confident, natural pacing]\n\n" + "\n\n... ".join(normalized)
+    return "\n\n".join(normalized)
 
 
 def _ffmpeg_audio_duration_seconds(audio_path: Path) -> float | None:
@@ -182,6 +186,7 @@ def _request_elevenlabs_audio(
     next_text: str | None = None,
 ) -> None:
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    has_context = bool(previous_text or next_text)
     payload = {
         "text": script_text,
         "model_id": settings.elevenlabs_model_id,
@@ -198,6 +203,24 @@ def _request_elevenlabs_audio(
     if next_text:
         payload["next_text"] = next_text
 
+    response = _post_elevenlabs_tts(url, payload)
+    if response.status_code >= 400 and has_context:
+        payload.pop("previous_text", None)
+        payload.pop("next_text", None)
+        response = _post_elevenlabs_tts(url, payload)
+
+    if response.status_code >= 400:
+        detail = _safe_response_detail(response)
+        raise RuntimeError(f"ElevenLabs voice generation failed ({response.status_code}): {detail}")
+
+    content_type = response.headers.get("content-type", "")
+    if not response.content or "audio" not in content_type.lower():
+        raise RuntimeError("ElevenLabs did not return audio for the selected voice.")
+
+    output_path.write_bytes(response.content)
+
+
+def _post_elevenlabs_tts(url: str, payload: dict) -> requests.Response:
     response = requests.post(
         url,
         headers={
@@ -208,8 +231,19 @@ def _request_elevenlabs_audio(
         json=payload,
         timeout=180,
     )
-    response.raise_for_status()
-    output_path.write_bytes(response.content)
+    return response
+
+
+def _safe_response_detail(response: requests.Response) -> str:
+    try:
+        detail = response.json()
+    except ValueError:
+        detail = response.text
+    text = str(detail)
+    if settings.elevenlabs_api_key:
+        text = text.replace(settings.elevenlabs_api_key, "[hidden]")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:700] or "No error details returned."
 
 
 def _split_tts_text(text: str, limit: int = 4300) -> list[str]:

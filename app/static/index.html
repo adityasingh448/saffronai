@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Saffron AI Sales Automation Agent</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=render-quality-flat-1" />
   </head>
   <body>
     <header class="site-nav">
@@ -57,12 +57,56 @@
           <div class="grid single">
             <label>
               Video format
-              <select name="video_format">
+              <select id="video-format" name="video_format">
                 <option value="horizontal" selected>Horizontal 16:9</option>
                 <option value="vertical">Vertical 9:16</option>
               </select>
             </label>
           </div>
+
+          <section class="render-section" aria-label="Render settings">
+            <span id="render-estimate" hidden>About 12m 22s</span>
+            <div id="quality-options" class="quality-options">
+              <label class="quality-card" data-quality="480p">
+                <input type="radio" name="render_quality" value="480p" />
+                <span class="quality-label">
+                  <strong>480p</strong>
+                  <span class="quality-speed">Fast</span>
+                </span>
+              </label>
+              <label class="quality-card selected" data-quality="720p">
+                <input type="radio" name="render_quality" value="720p" checked />
+                <span class="quality-label">
+                  <strong>720p</strong>
+                  <span class="quality-speed">Balance</span>
+                </span>
+              </label>
+              <label class="quality-card" data-quality="1080p">
+                <input type="radio" name="render_quality" value="1080p" />
+                <span class="quality-label">
+                  <strong>1080p</strong>
+                  <span class="quality-speed">Best</span>
+                </span>
+              </label>
+            </div>
+            <input id="render-fps" name="render_fps" type="hidden" value="30" />
+            <div id="fps-options" class="fps-options" aria-label="Render FPS">
+              <button type="button" class="fps-pill" data-fps="24">24</button>
+              <button type="button" class="fps-pill selected" data-fps="30">30</button>
+              <button type="button" class="fps-pill" data-fps="60">60</button>
+              <span>FPS</span>
+            </div>
+            <div class="render-metrics">
+              <div>
+                <span>Mode</span>
+                <strong id="quality-mode">Balance</strong>
+              </div>
+              <div>
+                <span>Render time</span>
+                <strong id="render-time-value">About 12m 22s</strong>
+              </div>
+            </div>
+          </section>
 
           <section class="voice-section" aria-label="Voice selection">
             <div class="section-head">
@@ -94,6 +138,20 @@
           <div class="step" data-step="video">Video render</div>
         </div>
 
+        <div id="progress-panel" class="progress-panel" hidden>
+          <div class="progress-copy">
+            <span id="progress-label">Waiting</span>
+            <strong id="progress-percent">0%</strong>
+          </div>
+          <div class="progress-track">
+            <span id="progress-fill"></span>
+          </div>
+          <div class="progress-meta">
+            <span id="progress-detail">Selected render settings will appear here.</span>
+            <span id="progress-eta">ETA calculating</span>
+          </div>
+        </div>
+
         <div id="result" class="result empty">
           <div class="empty-state">
             <div class="play-mark"></div>
@@ -104,6 +162,6 @@
       </section>
     </main>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=render-quality-card-3"></script>
   </body>
 </html>

@@ -1,5 +1,6 @@
 import React from 'react';
 import {Audio} from '@remotion/media';
+import {loadFont} from '@remotion/google-fonts/Inter';
 import {
   AbsoluteFill,
   Easing,
@@ -38,6 +39,9 @@ export type ReportWalkthroughProps = {
   prospectLabel: string;
   videoFormat: 'horizontal' | 'vertical';
   fps: number;
+  renderQuality: string;
+  renderWidth: number;
+  renderHeight: number;
   durationSeconds: number;
   audioSrc: string;
   pages: PageData[];
@@ -67,10 +71,15 @@ type CameraState = {
 };
 
 const SAFFRON = '#ee6723';
-const GOLD = '#f3ae32';
 const INK = '#171f2f';
 const MUTED = '#66758a';
 const LINE = '#d8e2ef';
+const WHITE = '#ffffff';
+const {fontFamily: interFontFamily} = loadFont('normal', {
+  weights: ['400', '500', '600', '700', '800', '900'],
+  subsets: ['latin'],
+});
+const FONT_FAMILY = `${interFontFamily}, Arial, sans-serif`;
 
 export const ReportWalkthrough: React.FC<ReportWalkthroughProps> = (props) => {
   const frame = useCurrentFrame();
@@ -82,7 +91,7 @@ export const ReportWalkthrough: React.FC<ReportWalkthroughProps> = (props) => {
     <AbsoluteFill
       style={{
         backgroundColor: '#f5f8fc',
-        fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+        fontFamily: FONT_FAMILY,
         overflow: 'hidden',
         color: INK,
       }}
@@ -121,7 +130,7 @@ export const ReportWalkthrough: React.FC<ReportWalkthroughProps> = (props) => {
         <div
           style={{
             color: SAFFRON,
-            fontSize: 18,
+            fontSize: Math.max(10, layout.titleSize * 0.42),
             fontWeight: 900,
             textTransform: 'uppercase',
           }}
@@ -177,7 +186,6 @@ const PageScene: React.FC<{
   const pointerIndex = Math.min(pointerCount - 1, Math.floor(pointerFloat));
   const pointerProgress = clamp(pointerFloat - pointerIndex, 0, 1);
   const activePointer = pointers[pointerIndex];
-  const previousPointer = pointerIndex > 0 ? pointers[pointerIndex - 1] : undefined;
 
   const enter = interpolate(frame, [0, fps * 0.62], [0, 1], {
     easing: Easing.bezier(0.16, 1, 0.3, 1),
@@ -199,11 +207,17 @@ const PageScene: React.FC<{
     page,
     layout.page,
     activePointer,
-    previousPointer,
     pointerProgress,
     frame,
   );
-  const markerOpacity = highlightOpacity(pointerProgress);
+  const cutOpacity =
+    pointerIndex > 0
+      ? interpolate(pointerProgress, [0, 0.08, 0.2], [0.62, 0.18, 0], {
+          easing: Easing.out(Easing.cubic),
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        })
+      : 0;
 
   return (
     <AbsoluteFill style={{opacity: sceneOpacity}}>
@@ -216,9 +230,10 @@ const PageScene: React.FC<{
           height: layout.page.height,
           borderRadius: 14,
           overflow: 'hidden',
-          background: '#fffaf6',
-          border: `2px solid ${LINE}`,
-          boxShadow: '0 28px 76px rgba(24, 34, 50, 0.16)',
+          background: 'rgba(255, 255, 255, 0.54)',
+          border: '1px solid rgba(255, 255, 255, 0.62)',
+          boxShadow: '0 30px 82px rgba(24, 34, 50, 0.20), 0 0 0 1px rgba(216, 226, 239, 0.72)',
+          backdropFilter: 'blur(18px) saturate(1.16)',
           transform: `translateY(${(1 - enter) * 34}px) scale(${0.992 + enter * 0.008})`,
         }}
       >
@@ -242,36 +257,23 @@ const PageScene: React.FC<{
               boxShadow: '0 20px 42px rgba(24, 34, 50, 0.12)',
             }}
           />
-          {pointers.map((pointer, markerIndex) => {
-            const active = markerIndex === pointerIndex;
-            return (
-              <div
-                key={`${pointer.label}-${markerIndex}`}
-                style={{
-                  position: 'absolute',
-                  left: pointer.x0 - 8,
-                  top: pointer.y0 - 5,
-                  width: Math.max(22, pointer.x1 - pointer.x0 + 16),
-                  height: Math.max(16, pointer.y1 - pointer.y0 + 10),
-                  borderRadius: 8,
-                  background: 'rgba(255, 215, 72, 0.46)',
-                  border: `3px solid ${SAFFRON}`,
-                  boxShadow: '0 12px 28px rgba(238, 103, 35, 0.18)',
-                  opacity: active ? markerOpacity : 0,
-                  transform: `scaleX(${active ? Math.max(0.08, markerOpacity) : 0})`,
-                  transformOrigin: 'left center',
-                  mixBlendMode: 'multiply',
-                }}
-              />
-            );
-          })}
         </div>
         <div
           style={{
             position: 'absolute',
             inset: 0,
             background:
-              'linear-gradient(180deg, rgba(255,250,246,0.98), transparent 14%, transparent 84%, rgba(255,250,246,0.98))',
+              'linear-gradient(180deg, rgba(255,250,246,0.58), transparent 13%, transparent 86%, rgba(255,250,246,0.58))',
+            opacity: 0.58,
+            pointerEvents: 'none',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: WHITE,
+            opacity: cutOpacity,
             pointerEvents: 'none',
           }}
         />
@@ -284,7 +286,6 @@ const PageScene: React.FC<{
         pointerCount={pointerCount}
         focus={page.focus}
         enter={enter}
-        frame={frame}
       />
 
       <PointerStrip
@@ -308,10 +309,13 @@ const SidePanel: React.FC<{
   pointerCount: number;
   focus: string;
   enter: number;
-  frame: number;
-}> = ({rect, pointer, pointerIndex, pointerCount, focus, enter, frame}) => {
+}> = ({rect, pointer, pointerIndex, pointerCount, focus, enter}) => {
   const panelX = (1 - enter) * 42;
   const label = trim(cleanLabel(pointer.label || focus || 'Key point'), 92);
+  const padding = clamp(rect.width * 0.055, 14, 30);
+  const eyebrowSize = clamp(rect.width * 0.034, 10, 20);
+  const headlineSize = clamp(rect.width * 0.062, 16, 34);
+  const bodySize = clamp(rect.width * 0.041, 12, 21);
 
   return (
     <div
@@ -322,158 +326,57 @@ const SidePanel: React.FC<{
         width: rect.width,
         height: rect.height,
         borderRadius: 14,
-        border: `2px solid ${LINE}`,
-        background: 'rgba(255, 255, 255, 0.94)',
-        boxShadow: '0 24px 58px rgba(24, 34, 50, 0.14)',
-        padding: 30,
+        border: '1px solid rgba(255, 255, 255, 0.66)',
+        background: 'rgba(255, 255, 255, 0.62)',
+        boxShadow: '0 26px 68px rgba(24, 34, 50, 0.16), inset 0 1px 0 rgba(255,255,255,0.78)',
+        backdropFilter: 'blur(18px) saturate(1.14)',
+        padding,
         opacity: enter,
         transform: `translateX(${panelX}px)`,
         overflow: 'hidden',
+        fontFamily: FONT_FAMILY,
       }}
     >
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-        <div style={{color: SAFFRON, fontSize: 20, fontWeight: 900}}>
+        <div style={{color: SAFFRON, fontSize: eyebrowSize, fontWeight: 900}}>
           Point {String(pointerIndex + 1).padStart(2, '0')}
         </div>
-        <div style={{color: MUTED, fontSize: 18, fontWeight: 800}}>
+        <div style={{color: MUTED, fontSize: Math.max(10, eyebrowSize * 0.9), fontWeight: 800}}>
           {pointerIndex + 1}/{pointerCount}
         </div>
       </div>
       <div
         style={{
-          marginTop: 16,
-          fontSize: rect.width > 700 ? 42 : 34,
+          marginTop: Math.max(8, padding * 0.55),
+          fontSize: headlineSize,
           lineHeight: 1.06,
           fontWeight: 900,
         }}
       >
         {label}
       </div>
-      <MotionGraphic frame={frame} />
-      <div style={{marginTop: 24, fontSize: 20, fontWeight: 900, color: INK}}>
-        What this means
+      <div
+        style={{
+          marginTop: Math.max(18, padding * 1.2),
+          width: '100%',
+          height: 1,
+          background: 'rgba(216, 226, 239, 0.92)',
+        }}
+      />
+      <div style={{marginTop: Math.max(14, padding * 0.82), fontSize: eyebrowSize, fontWeight: 900, color: SAFFRON}}>
+        Summary
       </div>
       <div
         style={{
           marginTop: 10,
-          fontSize: rect.width > 700 ? 25 : 21,
-          lineHeight: 1.32,
-          color: MUTED,
-          fontFamily: 'Georgia, serif',
+          fontSize: bodySize,
+          lineHeight: 1.38,
+          color: INK,
+          fontFamily: FONT_FAMILY,
+          fontWeight: 650,
         }}
       >
-        {takeaway(label)}
-      </div>
-      <div style={{position: 'absolute', left: 30, right: 30, bottom: 26, display: 'flex', gap: 12}}>
-        {['Fix', 'Prioritize', 'Measure'].map((chip) => (
-          <div
-            key={chip}
-            style={{
-              padding: '10px 16px',
-              borderRadius: 8,
-              border: '1px solid #ffd1bb',
-              color: SAFFRON,
-              background: '#fff4ed',
-              fontWeight: 900,
-              fontSize: 18,
-            }}
-          >
-            {chip}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const MotionGraphic: React.FC<{frame: number}> = ({frame}) => {
-  const bars = [0.42, 0.7, 0.56, 0.86, 0.64];
-  const wave = (offset: number) => 0.5 + Math.sin(frame / 18 + offset) * 0.5;
-
-  return (
-    <div
-      style={{
-        position: 'relative',
-        height: 154,
-        marginTop: 30,
-        borderRadius: 12,
-        border: '1px solid #e3ebf5',
-        background: '#f8fafc',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          left: 24,
-          right: 24,
-          bottom: 24,
-          height: 2,
-          background: '#d8e2ef',
-        }}
-      />
-      {bars.map((height, index) => {
-        const grow = 0.74 + wave(index * 0.8) * 0.26;
-        return (
-          <div
-            key={index}
-            style={{
-              position: 'absolute',
-              left: 28 + index * 54,
-              bottom: 24,
-              width: 28,
-              height: 92 * height * grow,
-              borderRadius: 7,
-              background: index === bars.length - 1 ? SAFFRON : '#ffbc7d',
-            }}
-          />
-        );
-      })}
-      <div
-        style={{
-          position: 'absolute',
-          right: 32,
-          top: 30 + wave(1.5) * 10,
-          width: 98,
-          height: 64,
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            left: 6,
-            bottom: 8,
-            width: 82,
-            height: 30,
-            borderRadius: 18,
-            background: '#e8f6ff',
-            border: '2px solid #1686ff',
-          }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            left: 28,
-            bottom: 20,
-            width: 42,
-            height: 42,
-            borderRadius: '50%',
-            background: '#e8f6ff',
-            border: '2px solid #1686ff',
-          }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            right: 4,
-            top: 0,
-            width: 22,
-            height: 22,
-            borderRadius: '50%',
-            background: GOLD,
-            boxShadow: '0 0 0 8px rgba(243, 174, 50, 0.18)',
-          }}
-        />
+        {summaryText(label)}
       </div>
     </div>
   );
@@ -487,6 +390,9 @@ const PointerStrip: React.FC<{
   pointerIndex: number;
   pointerCount: number;
 }> = ({rect, pageNumber, total, pointer, pointerIndex, pointerCount}) => {
+  const baseSize = clamp(rect.height * 0.29, 10, 18);
+  const dotSize = clamp(rect.height * 0.42, 18, 28);
+
   return (
     <div
       style={{
@@ -500,9 +406,9 @@ const PointerStrip: React.FC<{
         borderRadius: 10,
         border: `1px solid ${LINE}`,
         background: 'rgba(255,255,255,0.92)',
-        padding: '0 20px',
-        gap: 18,
-        fontSize: 18,
+        padding: `0 ${Math.max(10, rect.height * 0.3)}px`,
+        gap: Math.max(8, rect.height * 0.22),
+        fontSize: baseSize,
         fontWeight: 800,
       }}
     >
@@ -516,14 +422,14 @@ const PointerStrip: React.FC<{
         <span
           key={index}
           style={{
-            width: 28,
-            height: 28,
+            width: dotSize,
+            height: dotSize,
             borderRadius: 7,
             display: 'grid',
             placeItems: 'center',
             background: index === pointerIndex ? SAFFRON : '#eef2f7',
-            color: index === pointerIndex ? '#ffffff' : MUTED,
-            fontSize: 15,
+            color: index === pointerIndex ? WHITE : MUTED,
+            fontSize: Math.max(9, dotSize * 0.52),
           }}
         >
           {index + 1}
@@ -576,25 +482,43 @@ const EmptyState = () => (
 
 const getLayout = (width: number, height: number): Layout => {
   if (height > width) {
+    const margin = clamp(width * 0.055, 20, 62);
+    const headerH = clamp(height * 0.09, 64, 150);
+    const panelH = clamp(height * 0.24, 178, 468);
+    const stripH = clamp(height * 0.04, 42, 66);
+    const gap = clamp(height * 0.018, 18, 34);
+    const panelTop = height - margin - stripH - gap - panelH;
+    const pageTop = headerH;
+    const pageH = Math.max(240, panelTop - gap - pageTop);
+
     return {
-      titleTop: 78,
-      titleLeft: 62,
-      titleWidth: 900,
-      titleSize: 48,
-      page: {left: 62, top: 214, width: 956, height: 1018},
-      panel: {left: 78, top: 1288, width: 924, height: 468},
-      pointStrip: {left: 78, top: 1792, width: 924, height: 66},
+      titleTop: margin * 0.55,
+      titleLeft: margin,
+      titleWidth: width - margin * 2,
+      titleSize: clamp(width * 0.045, 24, 48),
+      page: {left: margin, top: pageTop, width: width - margin * 2, height: pageH},
+      panel: {left: margin, top: panelTop, width: width - margin * 2, height: panelH},
+      pointStrip: {left: margin, top: height - margin - stripH, width: width - margin * 2, height: stripH},
     };
   }
 
+  const margin = clamp(width * 0.032, 18, 68);
+  const headerH = clamp(height * 0.12, 56, 128);
+  const stripH = clamp(height * 0.072, 34, 62);
+  const gap = clamp(width * 0.018, 12, 36);
+  const panelW = clamp(width * 0.285, 220, 560);
+  const pageTop = headerH;
+  const pageH = Math.max(260, height - pageTop - stripH - margin * 1.7);
+  const pageW = Math.max(300, width - margin * 2 - gap - panelW);
+
   return {
-    titleTop: 54,
-    titleLeft: 68,
-    titleWidth: 1200,
-    titleSize: 48,
-    page: {left: 68, top: 148, width: 1186, height: 804},
-    panel: {left: 1290, top: 162, width: 560, height: 690},
-    pointStrip: {left: 68, top: 980, width: 1782, height: 62},
+    titleTop: margin * 0.55,
+    titleLeft: margin,
+    titleWidth: width - margin * 2,
+    titleSize: clamp(width * 0.025, 18, 38),
+    page: {left: margin, top: pageTop, width: pageW, height: pageH},
+    panel: {left: margin + pageW + gap, top: pageTop, width: panelW, height: pageH},
+    pointStrip: {left: margin, top: height - margin * 0.82 - stripH, width: width - margin * 2, height: stripH},
   };
 };
 
@@ -602,23 +526,28 @@ const cameraForPointer = (
   page: PageData,
   viewport: Rect,
   active: HighlightBox,
-  previous: HighlightBox | undefined,
   pointerProgress: number,
   frame: number,
 ): CameraState => {
-  const start = cameraState(page, viewport, previous);
-  const end = cameraState(page, viewport, active);
-  const mix = interpolate(pointerProgress, [0, 0.34], [0, 1], {
+  const fullPage = cameraState(page, viewport, undefined);
+  const focus = cameraState(page, viewport, active);
+  const zoomIn = interpolate(pointerProgress, [0.16, 0.44], [0, 1], {
     easing: Easing.bezier(0.45, 0, 0.2, 1),
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const breath = 1 + Math.sin(frame / 24) * 0.004;
+  const zoomOut = interpolate(pointerProgress, [0.82, 0.98], [0, 1], {
+    easing: Easing.bezier(0.45, 0, 0.2, 1),
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const focusMix = zoomIn * (1 - zoomOut);
+  const breath = 1 + Math.sin(frame / 30) * 0.0025 * focusMix;
 
   return {
-    x: lerp(start.x, end.x, mix),
-    y: lerp(start.y, end.y, mix),
-    scale: lerp(start.scale, end.scale, mix) * breath,
+    x: lerp(fullPage.x, focus.x, focusMix),
+    y: lerp(fullPage.y, focus.y, focusMix),
+    scale: lerp(fullPage.scale, focus.scale, focusMix) * breath,
   };
 };
 
@@ -628,8 +557,8 @@ const cameraState = (
   target: HighlightBox | undefined,
 ): CameraState => {
   const baseScale = Math.min(
-    (viewport.width * 0.78) / Math.max(1, page.width),
-    (viewport.height * 0.92) / Math.max(1, page.height),
+    (viewport.width * 0.94) / Math.max(1, page.width),
+    (viewport.height * 0.94) / Math.max(1, page.height),
   );
 
   if (!target) {
@@ -640,25 +569,27 @@ const cameraState = (
     };
   }
 
-  const targetWidth = Math.max(1, target.x1 - target.x0);
-  const targetHeight = Math.max(1, target.y1 - target.y0);
+  const targetWidth = Math.max(page.width * 0.42, target.x1 - target.x0);
+  const targetHeight = Math.max(page.height * 0.06, target.y1 - target.y0);
   const targetScale = Math.min(
-    (viewport.width * 0.62) / targetWidth,
-    (viewport.height * 0.29) / targetHeight,
+    (viewport.width * 0.78) / targetWidth,
+    (viewport.height * 0.44) / targetHeight,
   );
-  const scale = clamp(targetScale, baseScale * 1.44, baseScale * 2.45);
+  const scale = clamp(targetScale, baseScale * 1.55, baseScale * 2.6);
   const focusX = ((target.x0 + target.x1) / 2) * scale;
   const focusY = ((target.y0 + target.y1) / 2) * scale;
   const scaledW = page.width * scale;
   const scaledH = page.height * scale;
-  const minX = Math.min(24, viewport.width - scaledW - 24);
-  const maxX = 24;
-  const minY = Math.min(28, viewport.height - scaledH - 28);
-  const maxY = 28;
+  const edgeX = Math.max(8, viewport.width * 0.025);
+  const edgeY = Math.max(8, viewport.height * 0.025);
+  const minX = Math.min(edgeX, viewport.width - scaledW - edgeX);
+  const maxX = edgeX;
+  const minY = Math.min(edgeY, viewport.height - scaledH - edgeY);
+  const maxY = edgeY;
 
   return {
     x: clamp(viewport.width * 0.5 - focusX, minX, maxX),
-    y: clamp(viewport.height * 0.43 - focusY, minY, maxY),
+    y: clamp(viewport.height * 0.46 - focusY, minY, maxY),
     scale,
   };
 };
@@ -681,18 +612,8 @@ const normalizedHighlights = (page: PageData): HighlightBox[] => {
   }));
 };
 
-const highlightOpacity = (progress: number) => {
-  if (progress < 0.16) {
-    return progress / 0.16;
-  }
-  if (progress > 0.78) {
-    return Math.max(0, (1 - progress) / 0.22);
-  }
-  return 1;
-};
-
-const takeaway = (label: string) =>
-  `This section highlights ${trim(label, 54)}. Confirm the gap, prioritize the highest-impact action, and measure the result weekly.`;
+const summaryText = (label: string) =>
+  `Focus on ${trim(label, 54)}. This is the part to review first, convert into one clear action, and track against a measurable result.`;
 
 const cleanLabel = (text: string) =>
   (text || '')

@@ -8,12 +8,73 @@ const result = document.querySelector("#result");
 const steps = Array.from(document.querySelectorAll(".step"));
 const voiceOptions = document.querySelector("#voice-options");
 const voiceStatus = document.querySelector("#voice-status");
+const videoFormat = document.querySelector("#video-format");
+const maxMinutes = document.querySelector('input[name="max_minutes"]');
+const renderFps = document.querySelector("#render-fps");
+const renderEstimate = document.querySelector("#render-estimate");
+const qualityOptions = document.querySelector("#quality-options");
+const fpsOptions = document.querySelector("#fps-options");
+const qualityMode = document.querySelector("#quality-mode");
+const renderTimeValue = document.querySelector("#render-time-value");
+const progressPanel = document.querySelector("#progress-panel");
+const progressLabel = document.querySelector("#progress-label");
+const progressPercent = document.querySelector("#progress-percent");
+const progressFill = document.querySelector("#progress-fill");
+const progressDetail = document.querySelector("#progress-detail");
+const progressEta = document.querySelector("#progress-eta");
 
 let pollTimer = null;
 let previewAudio = new Audio();
 let activePreviewButton = null;
+let statusReadFailures = 0;
+let activeJobId = localStorage.getItem("saffron_active_job") || "";
+
+const RENDER_QUALITIES = [
+  {
+    value: "480p",
+    label: "480p Fast",
+    speed: "Fast",
+    description: "Fast preview render",
+    horizontal: [854, 480],
+    vertical: [480, 854],
+    factor: 1.8,
+  },
+  {
+    value: "720p",
+    label: "720p Balanced",
+    speed: "Balance",
+    description: "Good quality with faster turnaround",
+    horizontal: [1280, 720],
+    vertical: [720, 1280],
+    factor: 4,
+  },
+  {
+    value: "1080p",
+    label: "1080p Best",
+    speed: "Best",
+    description: "Full HD final export",
+    horizontal: [1920, 1080],
+    vertical: [1080, 1920],
+    factor: 7.5,
+  },
+];
 
 loadVoices();
+syncRenderOptions();
+resumeActiveJob();
+
+videoFormat.addEventListener("change", syncRenderOptions);
+renderFps.addEventListener("change", syncRenderOptions);
+maxMinutes.addEventListener("input", syncRenderOptions);
+qualityOptions.querySelectorAll('input[name="render_quality"]').forEach((input) => {
+  input.addEventListener("change", syncRenderOptions);
+});
+fpsOptions.querySelectorAll(".fps-pill").forEach((button) => {
+  button.addEventListener("click", () => {
+    renderFps.value = button.dataset.fps || "30";
+    renderFps.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+});
 
 fileInput.addEventListener("change", () => {
   fileLabel.textContent = fileInput.files[0]?.name || "Drop or choose report PDF";
@@ -22,9 +83,18 @@ fileInput.addEventListener("change", () => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearInterval(pollTimer);
+  statusReadFailures = 0;
   setBusy(true);
   setStatus("queued", "Uploading report");
   markStep("pdf");
+  updateProgress({
+    progress: {
+      percent: 0,
+      label: "Uploading report",
+      detail: selectedRenderSummary(),
+      eta_label: "ETA calculating",
+    },
+  });
   result.className = "result empty";
   result.innerHTML = `<div class="empty-state"><div class="play-mark"></div><p>Building your walkthrough...</p></div>`;
 
@@ -41,41 +111,109 @@ form.addEventListener("submit", async (event) => {
   }
 
   const payload = await response.json();
-  pollJob(payload.job_id);
-  pollTimer = setInterval(() => pollJob(payload.job_id), 1800);
+  startPolling(payload.job_id);
 });
 
 async function pollJob(jobId) {
-  const response = await fetch(`/api/jobs/${jobId}`);
+  let response;
+  try {
+    response = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+  } catch (_error) {
+    handleStatusReadRetry();
+    return;
+  }
+
   if (!response.ok) {
-    clearInterval(pollTimer);
-    showError("Could not read job status.");
-    setBusy(false);
+    handleStatusReadRetry();
     return;
   }
 
   const job = await response.json();
+  statusReadFailures = 0;
   setStatus(job.status, job.stage);
   syncSteps(job.stage, job.status);
+  updateProgress(job);
 
   if (job.status === "complete") {
     clearInterval(pollTimer);
+    localStorage.removeItem("saffron_active_job");
+    activeJobId = "";
     setBusy(false);
     renderResult(jobId, job);
   }
 
   if (job.status === "failed") {
     clearInterval(pollTimer);
+    localStorage.removeItem("saffron_active_job");
+    activeJobId = "";
     setBusy(false);
     showError(job.error || "Video generation failed.");
   }
 }
 
+function startPolling(jobId) {
+  activeJobId = jobId;
+  localStorage.setItem("saffron_active_job", jobId);
+  clearInterval(pollTimer);
+  pollJob(jobId);
+  pollTimer = setInterval(() => pollJob(jobId), 1800);
+}
+
+function handleStatusReadRetry() {
+  statusReadFailures += 1;
+  if (statusReadFailures <= 12) {
+    setBusy(true);
+    setStatus("running", "Reconnecting to render");
+    syncSteps("Rendering the video", "running");
+    updateProgress({
+      progress: {
+        percent: currentProgressPercent(),
+        label: "Reconnecting to render",
+        detail: "Status check is retrying. The render is still being tracked.",
+        eta_label: "Retrying",
+      },
+    });
+    return;
+  }
+
+  clearInterval(pollTimer);
+  localStorage.removeItem("saffron_active_job");
+  activeJobId = "";
+  showError("Could not read job status. Refresh once and try again.");
+  setBusy(false);
+}
+
+function currentProgressPercent() {
+  const current = Number(String(progressPercent.textContent || "0").replace("%", ""));
+  return Number.isFinite(current) ? current : 0;
+}
+
+function resumeActiveJob() {
+  if (!activeJobId) return;
+  setBusy(true);
+  setStatus("running", "Reconnecting to render");
+  markStep("video");
+  updateProgress({
+    progress: {
+      percent: currentProgressPercent(),
+      label: "Reconnecting to render",
+      detail: selectedRenderSummary(),
+      eta_label: "Retrying",
+    },
+  });
+  result.className = "result empty";
+  result.innerHTML = `<div class="empty-state"><div class="play-mark"></div><p>Resuming current render...</p></div>`;
+  startPolling(activeJobId);
+}
+
 function renderResult(jobId, job) {
   const format = job.summary?.video_format || job.inputs?.video_format || "horizontal";
+  const quality = job.summary?.render_quality || job.inputs?.render_quality || "720p";
+  const fps = job.summary?.render_fps || job.inputs?.render_fps || 30;
   result.className = format === "vertical" ? "result vertical-result" : "result";
   result.innerHTML = `
     <video controls src="/api/jobs/${jobId}/video"></video>
+    <div class="render-summary">${escapeHtml(quality)} - ${escapeHtml(fps)} FPS</div>
     <div class="actions">
       <a class="primary" href="/api/jobs/${jobId}/video" download>Download video</a>
       <a href="/api/jobs/${jobId}/script" download>Download script</a>
@@ -98,6 +236,22 @@ function setStatus(status, message) {
   stage.textContent = message || "Working";
   statusPill.className = `pill ${status}`;
   statusPill.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function updateProgress(job) {
+  const progress = job.progress;
+  if (!progress) {
+    progressPanel.hidden = true;
+    return;
+  }
+
+  const percent = Math.max(0, Math.min(Number(progress.percent || 0), 100));
+  progressPanel.hidden = false;
+  progressLabel.textContent = progress.label || job.stage || "Working";
+  progressPercent.textContent = `${Math.round(percent)}%`;
+  progressFill.style.width = `${percent}%`;
+  progressDetail.textContent = progress.detail || selectedRenderSummary();
+  progressEta.textContent = progress.eta_label ? `ETA ${progress.eta_label}` : "ETA calculating";
 }
 
 function markStep(activeKey) {
@@ -256,4 +410,56 @@ function resetPreviewButton(button) {
   button.disabled = false;
   button.textContent = "Play";
   if (activePreviewButton === button) activePreviewButton = null;
+}
+
+function syncRenderOptions() {
+  const selectedQuality = getSelectedQuality();
+  const fps = Number(renderFps.value || 30);
+  const minutes = Number(maxMinutes.value || 3);
+
+  qualityOptions.querySelectorAll(".quality-card").forEach((card) => {
+    const input = card.querySelector('input[name="render_quality"]');
+    const quality = RENDER_QUALITIES.find((item) => item.value === input.value) || RENDER_QUALITIES[1];
+    const title = card.querySelector("strong");
+    const speed = card.querySelector(".quality-speed");
+    card.classList.toggle("selected", input.checked);
+    title.textContent = quality.value;
+    speed.textContent = quality.speed;
+  });
+
+  fpsOptions.querySelectorAll(".fps-pill").forEach((button) => {
+    button.classList.toggle("selected", Number(button.dataset.fps) === fps);
+  });
+
+  const selectedEstimate = `About ${formatDuration(estimateRenderSeconds(minutes, selectedQuality.value, fps))}`;
+  renderEstimate.textContent = selectedEstimate;
+  qualityMode.textContent = selectedQuality.speed;
+  renderTimeValue.textContent = selectedEstimate;
+}
+
+function getSelectedQuality() {
+  const input = qualityOptions.querySelector('input[name="render_quality"]:checked');
+  return RENDER_QUALITIES.find((quality) => quality.value === input?.value) || RENDER_QUALITIES[1];
+}
+
+function selectedRenderSummary() {
+  const quality = getSelectedQuality();
+  const fps = Number(renderFps.value || 30);
+  return `${quality.value} at ${fps} FPS`;
+}
+
+function estimateRenderSeconds(minutes, qualityValue, fps) {
+  const quality = RENDER_QUALITIES.find((item) => item.value === qualityValue) || RENDER_QUALITIES[1];
+  const safeMinutes = Math.max(1, Math.min(Number(minutes || 3), 6));
+  const fpsFactor = fps === 24 ? 0.84 : fps === 60 ? 1.82 : 1;
+  return Math.ceil(22 + safeMinutes * 60 * quality.factor * fpsFactor);
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(1, Math.round(Number(seconds || 0)));
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  if (minutes <= 0) return `${remainder}s`;
+  if (remainder === 0) return `${minutes}m`;
+  return `${minutes}m ${remainder}s`;
 }

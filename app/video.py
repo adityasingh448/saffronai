@@ -3,17 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 import math
 import subprocess
-from typing import Iterable
+from typing import Callable, Iterable
 
 from imageio_ffmpeg import get_ffmpeg_exe
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from app.audio import audio_duration_seconds
 from app.pdf_tools import HighlightBox
+from app.render_options import normalize_render_fps, render_dimensions
 from app.script_writer import PageScript
 
 
 FPS = 24
+LocalProgressCallback = Callable[[float, str, int | None, int | None], None]
 SAFFRON = (238, 103, 35)
 GOLD = (240, 162, 38)
 INK = (20, 27, 39)
@@ -36,18 +38,23 @@ def compose_walkthrough_video(
     avatar_mode: str,
     prospect_label: str,
     video_format: str = "horizontal",
+    render_quality: str = "720p",
+    render_fps: int = FPS,
+    progress_callback: LocalProgressCallback | None = None,
 ) -> Path:
     if not page_images:
         raise ValueError("No PDF page images were provided for video composition.")
 
     duration = max(audio_duration_seconds(audio_path), len(page_images) * 4.0)
-    canvas_size = _canvas_size(video_format)
-    frame_total = max(int(duration * FPS), FPS)
+    fps = normalize_render_fps(render_fps)
+    canvas_size = render_dimensions(video_format, render_quality)
+    frame_total = max(int(duration * fps), fps)
     page_durations = _page_durations(page_scripts, duration, len(page_images))
     page_boundaries = _boundaries(page_durations)
 
     loaded_pages = [Image.open(path).convert("RGB") for path in page_images]
     loaded_highlights = page_highlights or [[] for _ in loaded_pages]
+    loaded_highlights = _align_highlight_labels(loaded_highlights, page_scripts, loaded_pages)
     fonts = _load_fonts()
 
     ffmpeg = get_ffmpeg_exe()
@@ -63,7 +70,7 @@ def compose_walkthrough_video(
         "-s",
         f"{canvas_size[0]}x{canvas_size[1]}",
         "-r",
-        str(FPS),
+        str(fps),
         "-i",
         "-",
         "-i",
@@ -87,7 +94,7 @@ def compose_walkthrough_video(
 
     try:
         for frame_index in range(frame_total):
-            current_time = frame_index / FPS
+            current_time = frame_index / fps
             page_index, local_progress = _locate_page(current_time, page_boundaries)
             page_index = min(page_index, len(loaded_pages) - 1)
             script = page_scripts[min(page_index, len(page_scripts) - 1)] if page_scripts else None
@@ -107,6 +114,8 @@ def compose_walkthrough_video(
                 canvas_size=canvas_size,
             )
             process.stdin.write(frame.tobytes())
+            if progress_callback and (frame_index % fps == 0 or frame_index == frame_total - 1):
+                progress_callback(frame_index / max(1, frame_total - 1), "Rendering frames", frame_index, frame_total)
     finally:
         process.stdin.close()
 
@@ -115,6 +124,46 @@ def compose_walkthrough_video(
         raise RuntimeError(f"FFmpeg failed with exit code {return_code}")
 
     return output_path
+
+
+def _align_highlight_labels(
+    page_highlights: list[list[HighlightBox]],
+    page_scripts: list[PageScript],
+    page_images: list[Image.Image],
+) -> list[list[HighlightBox]]:
+    aligned: list[list[HighlightBox]] = []
+    for index, page_image in enumerate(page_images):
+        script = page_scripts[min(index, len(page_scripts) - 1)] if page_scripts else None
+        labels = [label for label in (script.highlight_terms if script else []) if _clean_pointer_label(label)]
+        items = page_highlights[index] if index < len(page_highlights) else []
+        if items:
+            relabeled = []
+            for item_index, item in enumerate(items):
+                if labels and item_index >= len(labels):
+                    break
+                label = labels[item_index] if item_index < len(labels) else item.label
+                relabeled.append(HighlightBox(item.x0, item.y0, item.x1, item.y1, label))
+            aligned.append(relabeled)
+            continue
+
+        if labels:
+            width, height = page_image.size
+            aligned.append(
+                [
+                    HighlightBox(
+                        x0=width * 0.15,
+                        y0=height * (0.18 + item_index * 0.18),
+                        x1=width * 0.85,
+                        y1=height * (0.255 + item_index * 0.18),
+                        label=label,
+                    )
+                    for item_index, label in enumerate(labels[:4])
+                ]
+            )
+            continue
+
+        aligned.append(items)
+    return aligned
 
 
 def overlay_avatar_video(base_video: Path, avatar_video: Path, output_path: Path) -> Path:
@@ -224,7 +273,6 @@ def _render_frame(
         progress,
         frame_index,
     )
-    _draw_text_highlight(frame, page_viewport, placement, active_pointer, pointer_progress, frame_index)
     _draw_pointer_panel(
         frame,
         panel_rect,
@@ -574,7 +622,7 @@ def _draw_motion_graphic(
 def _viewer_takeaway(label: str, focus: str) -> str:
     label = _clean_pointer_label(label) or _clean_pointer_label(focus) or "this point"
     return (
-        f"This section highlights {label}. "
+        f"This section is about {label}. "
         "Focus your next action here: confirm the gap, fix the highest-impact item, then measure the result."
     )
 
