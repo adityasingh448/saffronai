@@ -40,6 +40,11 @@ class Settings:
     heygen_api_key: str | None = os.getenv("HEYGEN_API_KEY")
     heygen_avatar_id: str | None = os.getenv("HEYGEN_AVATAR_ID")
 
+    cloudinary_cloud_name: str | None = os.getenv("CLOUDINARY_CLOUD_NAME")
+    cloudinary_api_key: str | None = os.getenv("CLOUDINARY_API_KEY")
+    cloudinary_api_secret: str | None = os.getenv("CLOUDINARY_API_SECRET")
+    cloudinary_folder: str = os.getenv("CLOUDINARY_FOLDER", "saffron-ai/walkthroughs")
+
     video_renderer: str = os.getenv("VIDEO_RENDERER", "local").lower()
     hyperframes_template_dir: Path = _env_path("HYPERFRAMES_TEMPLATE_DIR", "hyperframes-sales-edit")
     hyperframes_cli: str = os.getenv("HYPERFRAMES_CLI", "")

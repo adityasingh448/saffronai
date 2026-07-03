@@ -220,6 +220,13 @@ function renderResult(jobId, job) {
   const format = job.summary?.video_format || job.inputs?.video_format || "horizontal";
   const quality = job.summary?.render_quality || job.inputs?.render_quality || "720p";
   const fps = job.summary?.render_fps || job.inputs?.render_fps || 30;
+  const cloudinaryUrl = job.artifacts?.cloudinary_url || "";
+  const cloudinaryError = job.artifacts?.cloudinary_error || "";
+  const cloudinaryMarkup = cloudinaryUrl
+    ? `<a href="${escapeHtml(cloudinaryUrl)}" target="_blank" rel="noreferrer">Open Cloudinary link</a>`
+    : cloudinaryError
+      ? `<span class="cloudinary-error">${escapeHtml(cloudinaryError)}</span>`
+      : "";
   result.className = format === "vertical" ? "result vertical-result" : "result";
   result.innerHTML = `
     <video controls src="/api/jobs/${jobId}/video"></video>
@@ -227,6 +234,7 @@ function renderResult(jobId, job) {
     <div class="actions">
       <a class="primary" href="/api/jobs/${jobId}/video" download>Download video</a>
       <a href="/api/jobs/${jobId}/script" download>Download script</a>
+      ${cloudinaryMarkup}
     </div>
   `;
 }

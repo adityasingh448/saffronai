@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.audio import synthesize_voice_preview, synthesize_voiceover
+from app.cloudinary_upload import can_use_cloudinary, upload_video_to_cloudinary
 from app.config import settings
 from app.heygen import can_use_heygen, create_heygen_avatar_video
 from app.hyperframes_renderer import can_use_hyperframes, compose_hyperframes_walkthrough_video
@@ -105,6 +106,7 @@ def health() -> dict:
         "openai": bool(settings.openai_api_key),
         "elevenlabs": bool(settings.elevenlabs_api_key),
         "deepgram": bool(settings.deepgram_api_key),
+        "cloudinary": can_use_cloudinary(),
         "heygen": can_use_heygen(),
         "hyperframes": can_use_hyperframes(),
         "remotion": can_use_remotion(),
@@ -479,6 +481,16 @@ def _run_pipeline(job_id: str) -> None:
             _set_stage(job_id, "running", "Overlaying HeyGen avatar on walkthrough", progress_percent=98)
             video_path = overlay_avatar_video(base_video_path, heygen_result.local_path, job_dir / "walkthrough.mp4")
 
+        cloudinary_result = None
+        cloudinary_error = ""
+        if can_use_cloudinary():
+            _set_stage(job_id, "running", "Uploading video to Cloudinary", progress_percent=99)
+            try:
+                cloudinary_result = upload_video_to_cloudinary(video_path, job_id=job_id, title=script.title)
+            except Exception as upload_exc:
+                cloudinary_error = str(upload_exc)
+                print(f"Cloudinary upload failed: {upload_exc}")
+
         job = _read_job(job_id)
         job["status"] = "complete"
         job["stage"] = "Ready"
@@ -492,6 +504,12 @@ def _run_pipeline(job_id: str) -> None:
         if heygen_result:
             job["artifacts"]["heygen_avatar"] = heygen_result.local_path.name
             job["artifacts"]["heygen_video_url"] = heygen_result.video_url
+        if cloudinary_result:
+            job["artifacts"]["cloudinary_url"] = cloudinary_result.secure_url
+            job["artifacts"]["cloudinary_public_id"] = cloudinary_result.public_id
+            job["artifacts"]["cloudinary_resource_type"] = cloudinary_result.resource_type
+        if cloudinary_error:
+            job["artifacts"]["cloudinary_error"] = _public_error_message(cloudinary_error)
         job["summary"] = {
             "pages": source_units,
             "source_type": source_type,
@@ -508,6 +526,7 @@ def _run_pipeline(job_id: str) -> None:
             "render_width": render_width,
             "render_height": render_height,
             "estimated_render_seconds": estimated_render_seconds,
+            "cloudinary_uploaded": bool(cloudinary_result),
         }
         _write_job(job_id, job)
     except Exception as exc:

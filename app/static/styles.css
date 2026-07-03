@@ -598,6 +598,14 @@ button:disabled {
   cursor: wait;
 }
 
+.cloudinary-error {
+  display: inline-flex;
+  align-items: center;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .pill {
   display: inline-grid;
   place-items: center;
